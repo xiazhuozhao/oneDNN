@@ -25,6 +25,9 @@
 #include "gpu/intel/jit/utils/ngen_type_bridge.hpp"
 #include "gpu/intel/utils.hpp"
 
+#include "gpu/intel/jit/gemm/ir/builder.hpp"
+#include "gpu/intel/jit/gemm/ir/kernel_desc.hpp"
+
 namespace dnnl {
 namespace impl {
 namespace gpu {
@@ -142,6 +145,18 @@ status_t gen_gemm_kernel_desc_t::finalize(const char *tags) {
             |= (isPacked(problem_.A.layout) || isPacked(problem_.B.layout));
     adjustStrategy(hw_, problem_, strategy_, tags);
     modifyStrategy(strategy_, aux_params_);
+
+    if (gpu_utils::dev_getenv("enable_gemm_ir", false)) {
+        if (strategy_.kParallel) {
+            strategy_.kParallel = false;
+            strategy_.C.atomic = false;
+            strategy_.CO.atomic = false;
+        }
+        if (strategy_.kParallelLocal) {
+            strategy_.kParallelLocal = false;
+            strategy_.kInterleave = false;
+        }
+    }
 
     // Align k slice size and quantization group size
     if (strategy_.kParallelLocal) {
@@ -946,6 +961,29 @@ status_t gen_gemm_kernel_t::get_kernel(
         compute::kernel_t &kernel, const compute::compute_engine_t *engine) {
     init_interface();
     maybe_print_verbose();
+
+    if (gpu_utils::dev_getenv("enable_gemm_ir", false)) {
+        auto gemm_desc = gemmstone::gemm_ir_desc_t(*desc()->problem(),
+                *desc()->strategy(), interface_, hw_t(engine));
+        ir::constraint_set_t cset;
+        if (gpu_utils::dev_getenv("gemm_ir_specialize", false)) {
+            if (desc()->n_ != -1)
+                cset.add_constraint(
+                        gemm_desc.kernel_iface().find_arg("m") == desc()->m_);
+            if (desc()->m_ != -1)
+                cset.add_constraint(
+                        gemm_desc.kernel_iface().find_arg("n") == desc()->n_);
+            if (desc()->k_ != -1)
+                cset.add_constraint(
+                        gemm_desc.kernel_iface().find_arg("k") == desc()->k_);
+        }
+        auto stmt = build_ir(gemm_desc, cset);
+        if (stmt.is_empty()) return status::unimplemented;
+        auto binary = lower_ir(stmt, gemm_desc.compile_ctx());
+
+        return engine->create_kernel_from_binary(
+                kernel, binary.data, gemm_desc.kernel_name(), {});
+    }
 
 #define ARCH_DISPATCH(arch) \
     case ngen::HW::arch: { \

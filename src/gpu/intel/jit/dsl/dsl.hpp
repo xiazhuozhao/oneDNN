@@ -107,16 +107,16 @@ struct transform_t {
     }
 
     // Tile used for 2d Messages
-    tile_t get_2d_tile(type_t type) const {
+    tile_t get_2d_tile(type_t type, bool is_store) const {
         if (transform == kind_t::transpose_vnni) {
             auto width = pack_size ? pack_size
                                    : grf_size / std::max(type.size(), 4);
-            auto height = 32;
+            auto height = is_store ? 8 : 32;
             return {{dims[1], width}, {dims[0], height}};
         }
 
         auto width = pack_size ? pack_size : grf_size / type.size();
-        auto height = 32;
+        auto height = is_store ? 8 : 32;
         return {{dims[0], width}, {dims[1], height}};
     }
 
@@ -155,6 +155,11 @@ struct tensor_t {
         oss << "buffer:    " << buffer.str() << "\n";
         oss << "layout: " << layout.str() << "\n";
         return oss.str();
+    }
+
+    tensor_t sub_tensor(v2::layout_t l, icoord_t coord) {
+        // gpu_assert(is_compatible(l, layout);
+        return {buffer[layout.offset_in_bytes(coord)], l};
     }
 
     expr_t buffer;

@@ -136,9 +136,8 @@ struct ctx_t {
 
         tile_t tile = plan.get_block_tile(type);
         v2::for_each(g.tile, tile, [&](const icoord_t &coord) {
-            auto buf = is_prefetch
-                    ? expr_t()
-                    : t.buffer[t.layout.offset_in_bytes(base + coord)];
+            auto buf = is_prefetch ? expr_t()
+                                   : t.buffer[t.layout.offset_in_bytes(coord)];
             auto width = std::min(tile[w_dim], g.tile[w_dim] - coord[w_dim]);
 
             auto width_bytes = width * type.size();
@@ -183,12 +182,11 @@ struct ctx_t {
         auto w_dim = plan.dims[0];
         auto h_dim = plan.dims[1];
         auto type = g.type;
-        auto tile = plan.get_2d_tile(type);
+        auto tile = plan.get_2d_tile(type, op_kind == load_store_kind_t::store);
 
         v2::for_each(g.tile, tile, [&](const icoord_t &coord) {
-            auto buf = is_prefetch
-                    ? expr_t()
-                    : t.buffer[t.layout.offset_in_bytes(base + coord)];
+            auto buf = is_prefetch ? expr_t()
+                                   : t.buffer[t.layout.offset_in_bytes(coord)];
             auto width = std::min(tile[w_dim], g.tile[w_dim] - coord[w_dim]);
             auto height = std::min(tile[h_dim], g.tile[h_dim] - coord[h_dim]);
             // TODO: Add logic to enable count for load operations
@@ -235,15 +233,7 @@ struct ctx_t {
                 || plan.transform == transform_t::kind_t::block
                 || plan.transform == transform_t::kind_t::vnni
                 || plan.transform == transform_t::kind_t::transpose_vnni) {
-            if_(((tensor_pitch % (min_align_2d / type.size())) == 0)
-                            & (tensor_pitch >= (min_pitch_2d / type.size())),
-                    [&]() { block_2d_message(t, g, plan, op_kind, base); },
-                    [&]() {
-                        if (plan.transform == transform_t::kind_t::block)
-                            block_message(t, g, plan, op_kind, base);
-                        else
-                            scatter_message(t, g, plan, op_kind, base);
-                    });
+            block_2d_message(t, g, plan, op_kind, base);
         } else if (plan.transform == transform_t::kind_t::none
                 || plan.transform == transform_t::kind_t::block) {
             block_message(t, g, plan, op_kind, base);
