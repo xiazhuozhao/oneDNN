@@ -125,7 +125,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store',]
 
 exclude_patterns += ['page_index.rst']
 # -- Options for HTML output -------------------------------------------------
-
+# today = date.today().strftime('%d %B, %Y')
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
@@ -140,13 +140,29 @@ html_static_path = ['_static']
 html_logo = '_static/oneAPI-rgb-rev-100.png'
 html_favicon = '_static/favicons.png'
 
+def get_git_last_updated_date():
+    try:
+        result = subprocess.check_output(
+            ['git', 'log', '-1', '--date=format:%d %B, %Y', '--format=%cd'],
+            stderr=subprocess.STDOUT,
+            encoding='utf-8'
+        )
+        return result.strip()
+    except Exception as e:
+        print(f"Error fetching last updated date: {e}")
+        return "Unknown"
+
+last_updated = get_git_last_updated_date()
+print("Last updated:", last_updated)
+
 html_theme_options = {
     "repository_url": "https://github.com/uxlfoundation/oneDNN",
     "repository_branch": "main",
     "use_repository_button": True,
     "use_download_button": True,
     "path_to_docs": "doc",
-    "use_issues_button": True
+    "use_issues_button": True,
+    "extra_footer": "<div>Last updated: " + last_updated + "</div>",
 }
 
 mathjax3_config = {
