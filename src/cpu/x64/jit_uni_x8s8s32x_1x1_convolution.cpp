@@ -41,7 +41,7 @@ using namespace dnnl::impl::utils;
 /* convolution forward */
 template <cpu_isa_t isa>
 status_t jit_uni_x8s8s32x_1x1_convolution_fwd_t<isa>::execute_forward(
-        const exec_ctx_t &ctx) const {
+        const std::shared_ptr<exec_ctx_t> &ctx) const {
     const auto src = CTX_IN_MEM(const char *, DNNL_ARG_SRC);
     const auto weights = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
     const auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
@@ -51,10 +51,10 @@ status_t jit_uni_x8s8s32x_1x1_convolution_fwd_t<isa>::execute_forward(
     auto bias_dw = CTX_IN_MEM(
             const char *, DNNL_ARG_ATTR_POST_OP_DW | DNNL_ARG_BIAS);
     const auto post_ops_binary_rhs_arg_vec
-            = binary_injector::prepare_binary_args(pd()->jcp_.post_ops, ctx);
+            = binary_injector::prepare_binary_args(pd()->jcp_.post_ops, *ctx);
     const auto post_ops_binary_rhs_arg_vec_dw = pd()->jcp_dw_
-            ? binary_injector::prepare_binary_args(pd()->jcp_dw_->post_ops, ctx,
-                    pd()->jcp_.post_ops.entry_.size() + 1)
+            ? binary_injector::prepare_binary_args(pd()->jcp_dw_->post_ops,
+                    *ctx, pd()->jcp_.post_ops.entry_.size() + 1)
             : std::vector<const void *> {};
 
     const int32_t *src_zero_points = CTX_IN_MEM(
@@ -71,7 +71,7 @@ status_t jit_uni_x8s8s32x_1x1_convolution_fwd_t<isa>::execute_forward(
     DEFINE_ARG_SCALES_BUFFER(
             dw_dst_scales, DNNL_ARG_ATTR_POST_OP_DW | DNNL_ARG_DST);
 
-    auto scratchpad = ctx.get_scratchpad_grantor();
+    auto scratchpad = ctx->get_scratchpad_grantor();
 
     auto local_scales
             = scratchpad.template get<float>(key_conv_adjusted_scales);

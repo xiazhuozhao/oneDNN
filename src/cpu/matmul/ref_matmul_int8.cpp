@@ -35,13 +35,13 @@ namespace impl {
 namespace cpu {
 namespace matmul {
 
-status_t ref_matmul_int8_t::execute_ref(const exec_ctx_t &ctx) const {
+status_t ref_matmul_int8_t::execute_ref(
+        const std::shared_ptr<exec_ctx_t> &ctx) const {
     status_t status = status::success;
     const auto src = CTX_IN_MEM(const void *, DNNL_ARG_SRC);
     const auto weights = CTX_IN_MEM(const void *, DNNL_ARG_WEIGHTS);
     const auto bias = CTX_IN_MEM(const void *, DNNL_ARG_BIAS);
-    auto dst = CTX_OUT_CLEAN_MEM(void *, DNNL_ARG_DST, status);
-    CHECK(status);
+    CTX_OUT_CLEAN_MEM(void *, dst, DNNL_ARG_DST, status);
 
     DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
     DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
@@ -54,15 +54,16 @@ status_t ref_matmul_int8_t::execute_ref(const exec_ctx_t &ctx) const {
     const int32_t *dst_zero_points = CTX_IN_MEM(
             const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST);
 
-    const auto src_d = ctx.memory_mdw(DNNL_ARG_SRC, pd()->src_md());
-    const auto weights_d = ctx.memory_mdw(DNNL_ARG_WEIGHTS, pd()->weights_md());
-    const auto dst_d = ctx.memory_mdw(DNNL_ARG_DST, pd()->dst_md());
-    const auto bia_d = ctx.memory_mdw(DNNL_ARG_BIAS, pd()->weights_md(1));
+    const auto src_d = ctx->memory_mdw(DNNL_ARG_SRC, pd()->src_md());
+    const auto weights_d
+            = ctx->memory_mdw(DNNL_ARG_WEIGHTS, pd()->weights_md());
+    const auto dst_d = ctx->memory_mdw(DNNL_ARG_DST, pd()->dst_md());
+    const auto bia_d = ctx->memory_mdw(DNNL_ARG_BIAS, pd()->weights_md(1));
 
     const auto src_scales_d
-            = ctx.memory_mdw(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
+            = ctx->memory_mdw(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
     const auto wei_scales_d
-            = ctx.memory_mdw(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
+            = ctx->memory_mdw(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
 
     if (src_d.has_zero_dim() || weights_d.has_zero_dim()
             || dst_d.has_zero_dim())
@@ -245,9 +246,8 @@ status_t ref_matmul_int8_t::execute_ref(const exec_ctx_t &ctx) const {
         const auto dst_off = dst_d.off_v(dst_dims_idx);
         if (non_default_attrs) {
 
-            ref_post_ops_t::args_t args;
+            ref_post_ops_t::args_t args(ctx);
             args.dst_val = io::load_float_value(sum_dt, dst, dst_off);
-            args.ctx = &ctx;
             args.l_offset = l_offset;
             args.dst_md = pd()->dst_md();
             ref_post_ops->execute(d, args);

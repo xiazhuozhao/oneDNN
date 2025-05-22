@@ -211,7 +211,8 @@ status_t acl_lowp_matmul_sq_t::create_resource(
     mapper.add(this, std::move(r));
     return status::success;
 }
-status_t acl_lowp_matmul_sq_t::execute(const exec_ctx_t &ctx) const {
+status_t acl_lowp_matmul_sq_t::execute(
+        const std::shared_ptr<exec_ctx_t> &ctx) const {
     std::lock_guard<std::mutex> _lock {this->mtx_};
     bool with_bias = pd()->almc_.with_bias;
     acl_lowp_matmul_sq_obj_t &acl_obj
@@ -240,7 +241,7 @@ status_t acl_lowp_matmul_sq_t::execute(const exec_ctx_t &ctx) const {
     const int32_t dst_zero_point = dst_zero_points ? dst_zero_points[0] : 0;
 
     if (with_bias) {
-        const auto scratchpad = ctx.get_scratchpad_grantor();
+        const auto scratchpad = ctx->get_scratchpad_grantor();
         auto bia_s32_base = scratchpad.get<uint32_t>(
                 memory_tracking::names::key_conv_bias_s32_convert);
         auto bia_f32_base = CTX_IN_MEM(const float32_t *, DNNL_ARG_BIAS);
