@@ -58,10 +58,6 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
     auto bias = CTX_IN_MEM(const void *, DNNL_ARG_BIAS);
     CTX_OUT_CLEAN_MEM(void *, dst, DNNL_ARG_DST, status);
 
-    DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
-    DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
-    DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
-
     const int32_t *src_zero_points = CTX_IN_MEM(
             const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC);
     const int32_t *dst_zero_points = CTX_IN_MEM(
@@ -232,7 +228,11 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
     const auto sum_dt = pd()->attr()->post_ops_.get_sum_dt(dst_d.data_type());
 
     parallel_nd(G, MB, OC, OD, OH, OW,
-            [&](dim_t g, dim_t mb, dim_t oc, dim_t od, dim_t oh, dim_t ow) {
+            [=](dim_t g, dim_t mb, dim_t oc, dim_t od, dim_t oh, dim_t ow) {
+                DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
+                DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
+                DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
+
                 int acc = 0;
                 if (src_d.is_plain() && weights_d.is_plain()
                         && src_ic_stride == 1 && weights_kw_stride == 1)
@@ -272,6 +272,7 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
                     d += dst_zp;
                 }
                 io::store_float_value(dst_d.data_type(), d, dst, dst_off);
+                return status::success;
             });
 
     return status::success;
@@ -449,7 +450,7 @@ status_t ref_convolution_int8_bwd_data_t::execute_backward_data(
     };
 
     parallel_nd(G, MB, IC, ID, IH, IW,
-            [&](dim_t g, dim_t mb, dim_t ic, dim_t id, dim_t ih, dim_t iw) {
+            [=](dim_t g, dim_t mb, dim_t ic, dim_t id, dim_t ih, dim_t iw) {
                 int acc = 0;
                 if (diff_dst_d.is_plain() && weights_d.is_plain()
                         && diff_dst_oc_stride == 1 && weights_kw_stride == 1)
