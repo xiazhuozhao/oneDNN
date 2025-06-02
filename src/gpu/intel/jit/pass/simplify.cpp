@@ -1739,6 +1739,7 @@ public:
 
         // External variable.
         if (obj.value.is_empty()) return ir_mutator_t::_mutate(obj);
+        if (obj.var.type().is_mutable()) return ir_mutator_t::_mutate(obj);
 
         // Substitute constants.
         value = simplify(obj.value, cset_);
