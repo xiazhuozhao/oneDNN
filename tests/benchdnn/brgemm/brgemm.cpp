@@ -1223,7 +1223,6 @@ int doit(const prb_t *prb, res_t *res) {
 
     namespace_impl::brgemm_post_ops_data_t post_ops_data(
             /* bias */ bia_dt_ptr,
-            /* scales */ scales_ptr,
             /* binary_post_ops_rhs */ binary_po_v.data(),
             /* oc_logical_off */ 0, /* dst_row_logical_off */ 0,
             // TODO: though the field is called `data_C_ptr_`, this is a
@@ -1238,6 +1237,8 @@ int doit(const prb_t *prb, res_t *res) {
             /* zp_a_val */ zp_a_val,
             /* do_only_comp */ false,
             /* do_only_zp_a_val */ false,
+            /* src_scales */ nullptr, // TODO: fix
+            /* wei_scales */ scales_ptr, // TODO: fix
             /* dst_scales */ dst_scales_ptr);
 
     // Note: hardware lacking native s8s8 support expects compensation buffer

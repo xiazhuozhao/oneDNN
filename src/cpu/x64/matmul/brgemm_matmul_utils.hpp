@@ -106,7 +106,8 @@ struct brgemm_matmul_conf_t {
     bool with_sum;
     bool with_eltwise;
     bool with_binary;
-    bool with_scales;
+    bool with_src_scales;
+    bool with_wei_scales;
     bool with_dst_scales;
     bool s8s8_compensation_required;
     bool packed_sparse_weights;
@@ -220,8 +221,8 @@ struct brgemm_matmul_conf_t {
     bool is_src_batch_layout_trivial = false;
     bool is_wei_batch_layout_trivial = false;
     bool is_dst_batch_layout_trivial = false;
-    bool is_oscale_per_n = false;
-    bool is_oscale_per_k = false;
+    bool is_wei_scale_per_n = false;
+    bool is_wei_scale_per_k = false;
     bool apply_scales_in_buffer_b = false;
     bool extendable_k = false;
 

@@ -126,9 +126,14 @@ void jit_brdgmm_kernel_base_t<Wmm>::read_params() {
         mov(ptr[rsp + reg_bias_offs_], reg_tmp);
     }
 
-    if (brg.with_scales) {
-        mov(reg_tmp, ptr[param1 + GET_OFF(ptr_scales)]);
-        mov(ptr[rsp + reg_scales_offs_], reg_tmp);
+    if (brg.with_src_scales) {
+        mov(reg_tmp, ptr[param1 + GET_OFF(ptr_src_scales)]);
+        mov(ptr[rsp + reg_src_scales_offs_], reg_tmp);
+    }
+
+    if (brg.with_wei_scales) {
+        mov(reg_tmp, ptr[param1 + GET_OFF(ptr_wei_scales)]);
+        mov(ptr[rsp + reg_wei_scales_offs_], reg_tmp);
     }
 
     if (brg.with_dst_scales) {
@@ -367,12 +372,13 @@ void jit_brdgmm_kernel_base_t<Wmm>::store_accumulators_apply_post_ops(
 
     const bool dq2ps_required = brg.is_int8;
     const int v_substep = vnni_substep();
-    if (brg.with_scales) {
-        mov(reg_aux_scales, ptr[rsp + reg_scales_offs_]);
-        if (brg.is_oc_scale) {
-            lea(reg_aux_scales,
-                    ptr[reg_aux_scales + reg_aux_N * sizeof(float)]);
-        }
+
+    if (brg.with_src_scales) {
+        mov(reg_aux_src_scales, ptr[rsp + reg_src_scales_offs_]);
+        auto vmm_src_scales = vmm_tmp(0);
+        if (!is_superset(brg.isa_impl, avx512_core))
+            vbroadcastss(vmm_src_scales, ptr[reg_aux_src_scales]);
+
         for_(int m = 0; m < m_blocks; m++)
         for_(int n = 0; n < n_blocks; n++)
         for (int v_i = 0; v_i < v_substep; ++v_i) {
@@ -382,22 +388,49 @@ void jit_brdgmm_kernel_base_t<Wmm>::store_accumulators_apply_post_ops(
             const Vmm vmm = accm(m_blocks, n_blocks, m, n, v_i);
             if (dq2ps_required) vcvtdq2ps(vmm, vmm);
 
+            if (is_superset(brg.isa_impl, avx512_core)) {
+                vmulps(vmm, vmm, ptr_b[reg_aux_src_scales]);
+            } else {
+                vmulps(vmm, vmm, vmm_src_scales);
+            }
+        }
+    }
+
+    if (brg.with_wei_scales) {
+        mov(reg_aux_wei_scales, ptr[rsp + reg_wei_scales_offs_]);
+        if (brg.is_oc_scale) {
+            lea(reg_aux_wei_scales,
+                    ptr[reg_aux_wei_scales + reg_aux_N * sizeof(float)]);
+        }
+
+        for_(int m = 0; m < m_blocks; m++)
+        for_(int n = 0; n < n_blocks; n++)
+        for (int v_i = 0; v_i < v_substep; ++v_i) {
+            const int substep_simd = get_substep_simd(n, v_i, has_n_tail);
+            if (substep_simd <= 0) continue;
+
+            const Vmm vmm = accm(m_blocks, n_blocks, m, n, v_i);
+            // If there are src scales, conversion happened there.
+            if (dq2ps_required && !brg.with_src_scales) vcvtdq2ps(vmm, vmm);
+
             const bool mask_flag = substep_simd < simd_w_;
             const bool scale_embdbcast = !brg.is_oc_scale;
             if (IMPLICATION(mask_flag || scale_embdbcast,
                         is_superset(brg.isa_impl, avx512_core))) {
                 const Vmm vmm_m = maybe_mask(vmm, mask_flag, false);
                 if (scale_embdbcast) {
-                    vmulps(vmm_m, vmm, ptr_b[reg_aux_scales]);
+                    vmulps(vmm_m, vmm, ptr_b[reg_aux_wei_scales]);
                 } else {
                     vmulps(vmm_m, vmm,
-                            ptr[reg_aux_scales + scales_offset(n, v_i)]);
+                            ptr[reg_aux_wei_scales
+                                    + wei_scales_offset(n, v_i)]);
                 }
             } else {
                 auto vmm_scale = vmm_tmp(0);
-                const auto addr = ptr[reg_aux_scales + scales_offset(n, v_i)];
+                const auto addr
+                        = ptr[reg_aux_wei_scales + wei_scales_offset(n, v_i)];
                 if (scale_embdbcast) {
-                    vbroadcastss(vmm_scale, ptr[reg_aux_scales]);
+                    vbroadcastss(vmm_scale, ptr[reg_aux_wei_scales]);
                 } else {
                     load_data(data_type::f32, vmm_scale, addr, substep_simd);
                 }
@@ -423,7 +456,8 @@ void jit_brdgmm_kernel_base_t<Wmm>::store_accumulators_apply_post_ops(
         }
         for (int m = 0; m < m_blocks; m++) {
             auto vmm = accm(m_blocks, n_blocks, m, n, v_i);
-            if (dq2ps_required && !brg.with_scales) vcvtdq2ps(vmm, vmm);
+            if (dq2ps_required && !(brg.with_src_scales || brg.with_wei_scales))
+                vcvtdq2ps(vmm, vmm);
             if (brg.with_bias) { vaddps(vmm, vmm, vmm_bias); }
         }
     }
@@ -702,9 +736,10 @@ void jit_brdgmm_kernel_base_t<Wmm>::store_accumulators(
     if (compute_compensation_)
         compute_int8_compensation(m_blocks, n_blocks, has_n_tail);
 
-    const bool are_post_ops_applicable = one_of(true, brg.with_eltwise,
-            brg.with_binary, brg.with_scales, brg.with_bias, brg.with_sum,
-            brg.dt_d != brg.dt_c, brg.with_dst_scales, compute_dst_zp_);
+    const bool are_post_ops_applicable
+            = one_of(true, brg.with_eltwise, brg.with_binary, brg.with_bias,
+                    brg.with_sum, brg.dt_d != brg.dt_c, brg.with_src_scales,
+                    brg.with_wei_scales, brg.with_dst_scales, compute_dst_zp_);
 
     Label label_done;
     if (are_post_ops_applicable) {

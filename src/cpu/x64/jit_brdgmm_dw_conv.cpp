@@ -595,9 +595,10 @@ status_t brdgmm_dw_convolution_fwd_t::execute(
 
     const auto &jcp = pd()->jcp_;
 
-    DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
-    DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
-    // DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
+    const float *src_scales
+            = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
+    const float *wei_scales = CTX_IN_MEM(
+            const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
     const float *dst_scales
             = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
 
@@ -605,12 +606,6 @@ status_t brdgmm_dw_convolution_fwd_t::execute(
             const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC);
     const int32_t *dst_zero_points = CTX_IN_MEM(
             const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST);
-
-    const int wei_scale_mask = pd()->attr()->scales_.get_mask(DNNL_ARG_WEIGHTS);
-    const float *oscales = scale_utils::precompute_scales(
-            ctx->get_scratchpad_grantor(), src_scales, wei_scales, pd()->IC(),
-            pd()->OC(), false, wei_scale_mask > 0, pd()->attr(),
-            jit_scale_precompute_.get());
 
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
     const size_t wei_size = weights_d.size();
@@ -769,7 +764,10 @@ status_t brdgmm_dw_convolution_fwd_t::execute(
 
             while (chb_loop_work) {
                 post_ops_data.bias = bias + ch * jcp.bia_dsz;
-                post_ops_data.scales = &oscales[jcp.is_oc_scale * ch];
+                post_ops_data.src_scales = src_scales;
+                post_ops_data.wei_scales = wei_scales
+                        ? &wei_scales[jcp.is_oc_scale * ch]
+                        : nullptr;
                 post_ops_data.oc_logical_off = ch;
                 post_ops_data.dst_scales = dst_scales;
                 const bool is_bcast_zp

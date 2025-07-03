@@ -833,19 +833,35 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::apply_post_ops(
 
     if (req_comp) maybe_apply_comp(m_block, n_block, tail);
 
-    if (brg_.beta != 0 && brg_.with_scales) {
+    if (brg_.beta != 0 && brg_.with_src_scales) {
+        mov(aux_reg_src_scales, ptr[rsp + reg_src_scales_offs_]);
+        auto vmm_src_scales = vmm_tmp(0);
+        uni_vbroadcastss(vmm_src_scales, ptr[aux_reg_src_scales]);
+
         for_(int m = 0; m < m_block; m++)
         for (int n = 0; n < n_block; n++) {
-            const auto addr = ptr[aux_reg_scales
+            auto vmm = vector(m, n);
+            if (isa_has_masks(brg_.isa_impl)) {
+                vmm = maybe_mask(vector(m, n), tail > 0, false, k_mask);
+                uni_vmulps(vmm, vmm, vmm_src_scales);
+            } else {
+                uni_vmulps(vmm, vmm, vmm_src_scales);
+            }
+        }
+    }
+    if (brg_.beta != 0 && brg_.with_wei_scales) {
+        for_(int m = 0; m < m_block; m++)
+        for (int n = 0; n < n_block; n++) {
+            const auto addr = ptr[aux_reg_wei_scales
                     + brg_.is_oc_scale * sizeof(float) * (n * brg_.ld_block)];
             auto vmm = vector(m, n);
             if (IMPLICATION(tail > 0, isa_has_masks(brg_.isa_impl))) {
                 vmm = maybe_mask(vector(m, n), tail > 0, false, k_mask);
                 vmulps(vmm, vmm, addr);
             } else {
-                auto vmm_scales = vmm_tmp(0);
-                load_data(data_type::f32, vmm_scales, addr, tail);
-                vmulps(vmm, vmm, vmm_scales);
+                auto vmm_wei_scales = vmm_tmp(0);
+                load_data(data_type::f32, vmm_wei_scales, addr, tail);
+                vmulps(vmm, vmm, vmm_wei_scales);
             }
         }
     }
@@ -1001,7 +1017,7 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::loop_by_N(
             mov(aux_reg_s8s8_comp, ptr[rsp + reg_s8s8_comp_offs_]);
             mov(ptr[rsp + aux_reg_s8s8_comp_offs_], aux_reg_s8s8_comp);
         }
-        if (brg_.with_scales) mov(aux_reg_scales, reg_scales);
+        if (brg_.with_wei_scales) mov(aux_reg_wei_scales, reg_wei_scales);
     }
     mov(aux_reg_out, reg_out);
 
@@ -1029,8 +1045,8 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::loop_by_N(
                 add(aux_reg_s8s8_comp, sizeof(int32_t) * oc_l_offset);
                 mov(ptr[rsp + aux_reg_s8s8_comp_offs_], aux_reg_s8s8_comp);
             }
-            if (brg_.with_scales)
-                add(aux_reg_scales,
+            if (brg_.with_wei_scales)
+                add(aux_reg_wei_scales,
                         brg_.is_oc_scale * sizeof(float) * oc_l_offset);
         }
     }
@@ -1057,8 +1073,8 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::loop_by_N(
                 add(aux_reg_s8s8_comp, sizeof(int32_t) * oc_l_offset);
                 mov(ptr[rsp + aux_reg_s8s8_comp_offs_], aux_reg_s8s8_comp);
             }
-            if (brg_.with_scales)
-                add(aux_reg_scales,
+            if (brg_.with_wei_scales)
+                add(aux_reg_wei_scales,
                         brg_.is_oc_scale * sizeof(float) * oc_l_offset);
         }
     }
@@ -1083,8 +1099,8 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::loop_by_N(
                 add(aux_reg_s8s8_comp, sizeof(int32_t) * nb_tail);
                 mov(ptr[rsp + aux_reg_s8s8_comp_offs_], aux_reg_s8s8_comp);
             }
-            if (brg_.with_scales)
-                add(aux_reg_scales,
+            if (brg_.with_wei_scales)
+                add(aux_reg_wei_scales,
                         brg_.is_oc_scale * bia_typesize_ * (nb_tail));
         }
         add(aux_reg_out, out_typesize_ * (nb_tail));
@@ -1127,8 +1143,12 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::generate() {
 
     if (brg_.alpha != 0) { mov(reg_in, ptr[param1 + GET_OFF(ptr_in)]); }
     if (brg_.beta != 0) {
-        if (brg_.with_scales) {
-            mov(reg_scales, ptr[param1 + GET_OFF(ptr_scales)]);
+        if (brg_.with_src_scales) {
+            mov(reg_src_scales, ptr[param1 + GET_OFF(ptr_src_scales)]);
+            mov(ptr[rsp + reg_src_scales_offs_], reg_src_scales);
+        }
+        if (brg_.with_wei_scales) {
+            mov(reg_wei_scales, ptr[param1 + GET_OFF(ptr_wei_scales)]);
         }
         mov(reg_apply_comp, ptr[param1 + GET_OFF(apply_comp)]);
         mov(ptr[rsp + reg_apply_comp_offs_], reg_apply_comp);

@@ -152,7 +152,8 @@ private:
             , iwb(0)
             , occ(0)
             , sw(0)
-            , oscales(nullptr)
+            , src_scales(nullptr)
+            , wei_scales(nullptr)
             , dst_scales(nullptr)
             , src_zp_val(0)
             , src_zp_comp_ptr(nullptr)
@@ -170,7 +171,8 @@ private:
         int id, idb, ih, ihb, iwb;
         int occ;
         int sw;
-        const float *oscales;
+        const float *src_scales;
+        const float *wei_scales;
         const float *dst_scales;
         int32_t src_zp_val;
         int32_t *src_zp_comp_ptr;
@@ -193,10 +195,11 @@ private:
     void perform_outwork(char *dst_base, char *dst, char *c_buffer,
             const char *bias_w, int od, int oh, int ow, int iw_raw, int g_oc,
             bool is_oc_tail, int ker_ow_s, int ker_ow_f, int kd_l, int kh_l,
-            const void *post_ops_binary_rhs_arg_vec, const float *oscales,
-            int32_t src_zp_val, int32_t *src_zp_ptr, const int32_t *dst_zp_ptr,
+            const void *post_ops_binary_rhs_arg_vec, int32_t src_zp_val,
+            int32_t *src_zp_ptr, const int32_t *dst_zp_ptr,
             int32_t *s8s8_compensation, size_t comp_ker_offs,
             bool maybe_do_init, bool do_postwork, bool do_post_comp,
+            const float *src_scales, const float *wei_scales,
             const float *dst_scales) const;
 
     void call_brgemm_kernel(brgemm_bwd_thread_ctx_t &btc, int brg_idx,

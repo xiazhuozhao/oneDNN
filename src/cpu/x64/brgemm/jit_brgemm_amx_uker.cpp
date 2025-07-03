@@ -1087,13 +1087,34 @@ void jit_brgemm_amx_uker_base_t::prepare_post_ops_registers(
         }
     }
 
-    if (brg.with_scales) {
-        mov(reg_scales, ptr[param1 + GET_OFF(ptr_scales)]);
-        for (int ldb = 0; ldb < ldi->block2(); ldb++) {
-            auto scales_ptr = EVEX_compress_addr(
-                    reg_scales, scales_offset(ldi->pos(ldb)));
-            auto k_mask = ldi->is_tail(ldb) ? ld_tail_mask : ld_full_mask;
-            vmovups(zmm_scales(ldb) | k_mask | T_z, scales_ptr);
+    if (brg.with_src_scales || brg.with_wei_scales) {
+        // Prepare weights scales first as the potentially have more than a
+        // single value.
+        if (brg.with_wei_scales) {
+            mov(reg_scales, ptr[param1 + GET_OFF(ptr_wei_scales)]);
+            for (int ldb = 0; ldb < ldi->block2(); ldb++) {
+                auto scales_ptr = EVEX_compress_addr(
+                        reg_scales, scales_offset(ldi->pos(ldb)));
+                auto k_mask = ldi->is_tail(ldb) ? ld_tail_mask : ld_full_mask;
+                vmovups(zmm_scales(ldb) | k_mask | T_z, scales_ptr);
+            }
+        }
+        if (brg.with_src_scales) {
+            mov(reg_scales, ptr[param1 + GET_OFF(ptr_src_scales)]);
+            for (int ldb = 0; ldb < ldi->block2(); ldb++) {
+                // Hard-coded assumption only a single src scales value is
+                // supported, thus, offset is 0.
+                auto scales_ptr = EVEX_compress_addr(reg_scales, 0);
+                auto k_mask = ldi->is_tail(ldb) ? ld_tail_mask : ld_full_mask;
+                if (brg.with_wei_scales) {
+                    // Multiply by weights scales if they are present.
+                    vmulps(zmm_scales(ldb) | k_mask | T_z, zmm_scales(ldb),
+                            scales_ptr);
+                } else {
+                    // Move into scales register otherwise..
+                    vmovups(zmm_scales(ldb) | k_mask | T_z, scales_ptr);
+                }
+            }
         }
     }
 }
@@ -1377,7 +1398,7 @@ void jit_brgemm_amx_uker_base_t::process_output_range(
         }
     }
 
-    if (brg.with_scales) {
+    if (brg.with_src_scales || brg.with_wei_scales) {
         for (auto bd = bd_start; bd < bd_finish; bd++) {
             if (!is_out_bd(bi.bdi, bdb, bd)) continue;
 

@@ -90,17 +90,12 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
 
     const auto &jbgp = pd()->jbgp_;
 
-    DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
-    DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
-    // DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
+    const float *src_scales
+            = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
+    const float *wei_scales = CTX_IN_MEM(
+            const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
     const float *dst_scales
             = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
-
-    const int wei_scale_mask = pd()->attr()->scales_.get_mask(DNNL_ARG_WEIGHTS);
-    const float *oscales
-            = scale_utils::precompute_scales(scratchpad, src_scales, wei_scales,
-                    pd()->IC(), pd()->OC(), false, wei_scale_mask == (1 << 0),
-                    pd()->attr(), jit_scale_precompute_.get());
 
     const size_t src_dt_size = types::data_type_size(jbgp.src_dt);
     const size_t bia_dt_size
@@ -285,10 +280,12 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                         = jbgp.with_bias ? bias + bia_dt_size * oc : nullptr;
                 const brgemm_post_ops_data_t post_ops_data {
                         static_cast<const void *>(ptr_bias),
-                        &oscales[jbgp.is_oc_scale * oc],
                         post_ops_binary_rhs_arg_vec.data(),
                         static_cast<size_t>(oc), 0, dst, 0, nullptr, nullptr,
-                        nullptr, false, 1, false, false, dst_scales};
+                        nullptr, false, 1, false, false, src_scales,
+                        wei_scales ? &wei_scales[jbgp.is_oc_scale * oc]
+                                   : nullptr,
+                        dst_scales};
 
                 brgemm_kernel_execute_postops(brg_kernel, gemm_batch,
                         addr_batch, (void *)ptr_C, (void *)ptr_D, post_ops_data,
@@ -330,10 +327,12 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
                         = jbgp.with_bias ? bias + bia_dt_size * oc : nullptr;
                 const brgemm_post_ops_data_t post_ops_data {
                         static_cast<const void *>(ptr_bias),
-                        &oscales[jbgp.is_oc_scale * oc],
                         post_ops_binary_rhs_arg_vec.data(),
                         static_cast<size_t>(oc), 0, dst, 0, nullptr, nullptr,
-                        nullptr, false, 1, false, false, dst_scales};
+                        nullptr, false, 1, false, false, src_scales,
+                        wei_scales ? &wei_scales[jbgp.is_oc_scale * oc]
+                                   : nullptr,
+                        dst_scales};
 
                 brgemm_kernel_execute_postops(brg_kernel_ic_tail, 1, addr_batch,
                         (void *)ptr_C, (void *)ptr_D, post_ops_data, scratch);
@@ -605,11 +604,14 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
 
                             const brgemm_post_ops_data_t post_ops_data {
                                     static_cast<const void *>(ptr_bias),
-                                    &oscales[jbgp.is_oc_scale * oc],
                                     post_ops_binary_rhs_arg_vec.data(),
                                     static_cast<size_t>(oc), 0, dst, 0, nullptr,
                                     nullptr, nullptr, true /* skip_accm */, 1,
-                                    false, false, dst_scales};
+                                    false, false, src_scales,
+                                    wei_scales
+                                            ? &wei_scales[jbgp.is_oc_scale * oc]
+                                            : nullptr,
+                                    dst_scales};
 
                             brgemm_kernel_execute_postops(brg_kernel, 0,
                                     nullptr, (void *)ptr_C, (void *)ptr_D,

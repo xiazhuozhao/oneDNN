@@ -197,8 +197,9 @@ private:
     const reg64_t reg_strd_batch = reg_rdb_loop;
 
     const reg64_t reg_bias = reg_rdb_loop;
-    const reg64_t reg_scales = reg_rdb_loop;
     const reg64_t reg_aux_bias = reg_rdb_loop;
+    const reg64_t reg_src_scales = reg_rdb_loop;
+    const reg64_t reg_wei_scales = reg_rdb_loop;
     const reg64_t reg_dst_scales = reg_rdb_loop;
     const reg64_t reg_zp_comp_a = reg_rdb_loop;
     const reg64_t reg_aux_zp_comp_a = reg_rdb_loop;
@@ -208,7 +209,8 @@ private:
     const reg64_t reg_aux_zp_c_values = reg_rdb_loop;
     const reg64_t reg_tmp_read_values = reg_rdb_loop;
 
-    const reg64_t reg_aux_scales = reg_aux_B;
+    const reg64_t reg_aux_src_scales = reg_aux_B;
+    const reg64_t reg_aux_wei_scales = reg_aux_B;
     const reg64_t reg_aux_dst_scales = reg_aux_B;
     const reg64_t reg_do_post_ops = reg_rdb_loop;
     const reg64_t reg_do_comp = reg_rdb_loop;
@@ -243,8 +245,8 @@ private:
     constexpr static int reg_do_post_ops_offs_ = 24;
     constexpr static int reg_D_offs_ = 32;
     constexpr static int reg_aux_D_offs_ = 40;
-    constexpr static int reg_scales_offs_ = 48;
-    constexpr static int reg_aux_scales_offs_ = 56;
+    constexpr static int reg_wei_scales_offs_ = 48;
+    constexpr static int reg_aux_wei_scales_offs_ = 56;
     constexpr static int reg_bdb_loop_offs_ = 64;
     constexpr static int reg_ldb_loop_offs_ = 72;
     constexpr static int reg_buf_offs_ = 80;
@@ -273,7 +275,8 @@ private:
     // these are used for FP8 as temporary push/pop spaces
     constexpr static int reg_val_tmp_1_ = 256;
     constexpr static int reg_val_tmp_2_ = 264;
-    constexpr static int stack_space_needed_ = 272;
+    constexpr static int reg_src_scales_offs_ = 272;
+    constexpr static int stack_space_needed_ = 280;
 
     bool is_ldb_loop_ = false;
     bool with_binary_non_scalar_bcast_ = false;
@@ -459,7 +462,7 @@ private:
     dim_t compensations_offset(dim_t ld, bool is_tail = false) const noexcept;
     dim_t bdb_compensation_offset(dim_t bd_block2) const noexcept;
     dim_t bd_compensation_offset(dim_t ld, dim_t bd) const noexcept;
-    dim_t scales_offset(dim_t ld, bool is_tail = false) const noexcept;
+    dim_t wei_scales_offset(dim_t ld, bool is_tail = false) const noexcept;
     dim_t zp_comp_a_offset(dim_t ld, bool is_tail = false) const noexcept;
     dim_t bd_zp_comp_a_offset(dim_t ld, dim_t bd) const noexcept;
     dim_t bdb_zp_comp_a_offset(dim_t bd_block2) const noexcept;
@@ -599,7 +602,7 @@ dim_t jit_brgemm_kernel_t<Wmm>::bd_compensation_offset(
 }
 
 template <typename Wmm>
-dim_t jit_brgemm_kernel_t<Wmm>::scales_offset(
+dim_t jit_brgemm_kernel_t<Wmm>::wei_scales_offset(
         dim_t ld, bool is_tail) const noexcept {
     return (is_tail) ? brg.is_oc_scale * sizeof(float) * brg.ldb_tail
                      : brg.is_oc_scale * sizeof(float) * ld * brg.ld_block;
@@ -719,10 +722,10 @@ void jit_brgemm_kernel_t<Wmm>::advance_ldb_post_op_regs() {
         add(reg_aux_bias, bias_offset(1));
         mov(ptr[rsp + reg_aux_bias_offs_], reg_aux_bias);
     }
-    if (brg.with_scales) {
-        mov(reg_aux_scales, ptr[rsp + reg_aux_scales_offs_]);
-        add(reg_aux_scales, scales_offset(1));
-        mov(ptr[rsp + reg_aux_scales_offs_], reg_aux_scales);
+    if (brg.with_wei_scales) {
+        mov(reg_aux_wei_scales, ptr[rsp + reg_aux_wei_scales_offs_]);
+        add(reg_aux_wei_scales, wei_scales_offset(1));
+        mov(ptr[rsp + reg_aux_wei_scales_offs_], reg_aux_wei_scales);
     }
     if (brg.zp_type_a != brgemm_broadcast_t::none) {
         mov(reg_aux_zp_comp_a, ptr[rsp + reg_aux_zp_comp_a_offs_]);
@@ -743,10 +746,10 @@ void jit_brgemm_kernel_t<Wmm>::restore_ldb_post_op_regs(dim_t ld_block2) {
         sub(reg_aux_bias, bias_offset(ld_block2 - 1));
         mov(ptr[rsp + reg_aux_bias_offs_], reg_aux_bias);
     }
-    if (brg.with_scales) {
-        mov(reg_aux_scales, ptr[rsp + reg_aux_scales_offs_]);
-        sub(reg_aux_scales, scales_offset(ld_block2 - 1));
-        mov(ptr[rsp + reg_aux_scales_offs_], reg_aux_scales);
+    if (brg.with_wei_scales) {
+        mov(reg_aux_wei_scales, ptr[rsp + reg_aux_wei_scales_offs_]);
+        sub(reg_aux_wei_scales, wei_scales_offset(ld_block2 - 1));
+        mov(ptr[rsp + reg_aux_wei_scales_offs_], reg_aux_wei_scales);
     }
     if (brg.zp_type_a != brgemm_broadcast_t::none) {
         mov(reg_aux_zp_comp_a, ptr[rsp + reg_aux_zp_comp_a_offs_]);
@@ -820,11 +823,12 @@ void jit_brgemm_kernel_t<Wmm>::ldb_regs_shift(dim_t ld_block2, bool is_tail) {
                           : compensations_offset(ld_block2));
         mov(ptr[rsp + reg_aux_comp_offs_], reg_aux_compensation);
     }
-    if (brg.with_scales) {
-        mov(reg_aux_scales, ptr[rsp + reg_aux_scales_offs_]);
-        add(reg_aux_scales,
-                (is_tail) ? scales_offset(1, true) : scales_offset(ld_block2));
-        mov(ptr[rsp + reg_aux_scales_offs_], reg_aux_scales);
+    if (brg.with_wei_scales) {
+        mov(reg_aux_wei_scales, ptr[rsp + reg_aux_wei_scales_offs_]);
+        add(reg_aux_wei_scales,
+                (is_tail) ? wei_scales_offset(1, true)
+                          : wei_scales_offset(ld_block2));
+        mov(ptr[rsp + reg_aux_wei_scales_offs_], reg_aux_wei_scales);
     }
     if (brg.zp_type_a != brgemm_broadcast_t::none) {
         mov(reg_aux_zp_comp_a, ptr[rsp + reg_aux_zp_comp_a_offs_]);
@@ -879,9 +883,9 @@ void jit_brgemm_kernel_t<Wmm>::copy_post_ops_stack_values_to_aux(
             mov(reg_compensation, ptr[rsp + reg_comp_offs_]);
             mov(ptr[rsp + reg_aux_comp_offs_], reg_compensation);
         }
-        if (brg.with_scales) {
-            mov(reg_scales, ptr[rsp + reg_scales_offs_]);
-            mov(ptr[rsp + reg_aux_scales_offs_], reg_scales);
+        if (brg.with_wei_scales) {
+            mov(reg_wei_scales, ptr[rsp + reg_wei_scales_offs_]);
+            mov(ptr[rsp + reg_aux_wei_scales_offs_], reg_wei_scales);
         }
 
         if (brg.zp_type_a != brgemm_broadcast_t::none) {
@@ -941,9 +945,15 @@ void jit_brgemm_kernel_t<Wmm>::read_params() {
         mov(reg_bias, ptr[param1 + GET_OFF(ptr_bias)]);
         mov(ptr[rsp + reg_bias_offs_], reg_bias);
     }
-    if (brg.with_scales) {
-        mov(reg_scales, ptr[param1 + GET_OFF(ptr_scales)]);
-        mov(ptr[rsp + reg_scales_offs_], reg_scales);
+
+    if (brg.with_src_scales) {
+        mov(reg_src_scales, ptr[param1 + GET_OFF(ptr_src_scales)]);
+        mov(ptr[rsp + reg_src_scales_offs_], reg_src_scales);
+    }
+
+    if (brg.with_wei_scales) {
+        mov(reg_wei_scales, ptr[param1 + GET_OFF(ptr_wei_scales)]);
+        mov(ptr[rsp + reg_wei_scales_offs_], reg_wei_scales);
     }
 
     if (brg.zp_type_a != brgemm_broadcast_t::none) {
@@ -1303,24 +1313,50 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
     const bool dq2ps_required = brg.is_int8
             && IMPLICATION(alpha_or_beta_applicable, beta_uses_vadd);
 
-    if (brg.with_scales) {
-        mov(reg_aux_scales, ptr[rsp + reg_aux_scales_offs_]);
+    if (brg.with_src_scales) {
+        mov(reg_aux_src_scales, ptr[rsp + reg_src_scales_offs_]);
+        auto vmm_src_scales = vmm_tmp(0);
+        vbroadcastss(vmm_src_scales, ptr[reg_aux_src_scales]);
+
+        for_(dim_t ld = 0; ld < ld_block2; ld++)
+        for (dim_t bd = 0; bd < bd_block; bd++) {
+            auto vmm = accm(ld_block2, bd, ld);
+            if (dq2ps_required) uni_vcvtdq2ps(vmm, vmm);
+            vmulps(vmm, vmm, vmm_src_scales);
+        }
+    }
+
+    if (brg.with_wei_scales) {
+        mov(reg_aux_wei_scales, ptr[rsp + reg_aux_wei_scales_offs_]);
         for (dim_t ld = 0; ld < ld_block2; ld++) {
-            const auto addr = ptr[reg_aux_scales + scales_offset(ld)];
+            const auto addr = ptr[reg_aux_wei_scales + wei_scales_offset(ld)];
             const bool is_tail = is_ld_tail && ld + 1 == ld_block2;
-            auto vmm_scales = vmm_tmp(0);
-            if (IMPLICATION(is_tail, isa_has_masks(brg.isa_impl))) {
+            const bool scale_embdbcast = !brg.is_oc_scale;
+
+            auto vmm_wei_scales = vmm_tmp(0);
+            if (IMPLICATION(is_tail || scale_embdbcast,
+                        isa_has_masks(brg.isa_impl))) {
                 const Vmm vmm_masked
-                        = vmm_mask(vmm_scales, is_tail, false, k_mask);
-                uni_vmovups(vmm_masked, addr);
+                        = vmm_mask(vmm_wei_scales, is_tail, false, k_mask);
+                if (scale_embdbcast) {
+                    vbroadcastss(vmm_masked, addr);
+                } else {
+                    uni_vmovups(vmm_masked, addr);
+                }
             } else {
-                auto vmm_scales = vmm_tmp(0);
-                vmaskmovps(vmm_scales, vmm_tail_mask(), addr);
+                if (scale_embdbcast) {
+                    vbroadcastss(vmm_wei_scales, addr);
+                } else {
+                    vmaskmovps(vmm_wei_scales, vmm_tail_mask(), addr);
+                }
             }
             for (dim_t bd = 0; bd < bd_block; bd++) {
                 auto vmm = accm(ld_block2, bd, ld);
-                if (dq2ps_required) uni_vcvtdq2ps(vmm, vmm);
-                uni_vmulps(vmm, vmm, vmm_scales);
+                // If there are src scales, conversion happened there.
+                if (dq2ps_required && !brg.with_src_scales) {
+                    uni_vcvtdq2ps(vmm, vmm);
+                }
+                uni_vmulps(vmm, vmm, vmm_wei_scales);
             }
         }
     }
@@ -1338,7 +1374,8 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
         }
         for (dim_t bd = 0; bd < bd_block; bd++) {
             auto vmm = accm(ld_block2, bd, ld);
-            if (dq2ps_required && !brg.with_scales) uni_vcvtdq2ps(vmm, vmm);
+            if (dq2ps_required && !(brg.with_src_scales || brg.with_wei_scales))
+                uni_vcvtdq2ps(vmm, vmm);
             if (brg.with_bias) uni_vaddps(vmm, vmm, vmm_bias);
         }
     }
@@ -1729,9 +1766,9 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators(dim_t bd_block2,
                         sub(reg_aux_D, ldb_D_offset(ld_block2 - 1));
                         restore_ldb_post_op_regs(ld_block2);
                         post_processed |= utils::one_of(true, brg.with_bias,
-                                brg.with_scales,
                                 brg.zp_type_a != brgemm_broadcast_t::none,
                                 brg.zp_type_c == brgemm_broadcast_t::per_n,
+                                brg.with_src_scales, brg.with_wei_scales,
                                 brg.with_dst_scales);
                     }
                     if (bdb < bd_block2 - 1) {

@@ -554,6 +554,7 @@ status_t brgemm_convolution_fwd_t<isa>::pd_t::init(engine_t *engine) {
             && !jcp_.req_brg_comp_pad;
 
     ic_chunks = div_up(jcp_.nb_ic, jcp_.nb_ic_blocking);
+    // TODO: fix `with_scales`
     need_postwork = jcp_.with_bias || jcp_.with_eltwise || jcp_.with_binary
             || jcp_.with_scales || jcp_.with_dst_scales || need_compensation
             || (jcp_.dst_dt != jcp_.acc_dt) || jcp_.with_sum || jcp_.use_M_mask
@@ -1250,11 +1251,12 @@ struct brgemm_convolution_fwd_t<isa>::brgemm_thread_ctx_t {
     int g {-1}, n {-1}, ocb {-1};
     int od {-1}, odb {-1}, oh {-1}, ohb {-1}, owb {-1};
     int icc {-1};
-    const float *__restrict oscales {nullptr};
     int32_t src_zp_val {0};
     int32_t *__restrict src_zp_comp_ptr {nullptr};
     const int32_t *__restrict dst_zp_vals {nullptr};
     int32_t *__restrict s8s8_comp_ptr {nullptr};
+    const float *__restrict src_scales {nullptr};
+    const float *__restrict wei_scales {nullptr};
     const float *__restrict dst_scales {nullptr};
     char *__restrict inp_buffer {nullptr};
     const char *__restrict input {nullptr};
@@ -1274,19 +1276,14 @@ status_t brgemm_convolution_fwd_t<isa>::execute(
     const int32_t *dst_zero_points = CTX_IN_MEM(
             const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST);
 
-    DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
-    DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
-    // DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
+    const float *src_scales
+            = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
+    const float *wei_scales = CTX_IN_MEM(
+            const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
     const float *dst_scales
             = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
 
     const memory_tracking::grantor_t scratchpad = ctx->get_scratchpad_grantor();
-
-    const int wei_scale_mask = pd()->attr()->scales_.get_mask(DNNL_ARG_WEIGHTS);
-    const float *oscales = scale_utils::precompute_scales(scratchpad,
-            src_scales, wei_scales, pd()->IC(), pd()->OC(), false,
-            wei_scale_mask > 0, pd()->attr(), jit_scale_precompute_.get(),
-            jcp.scale_adjust_factor);
 
     auto brgemm_ctx = std::make_shared<brgemm_exec_ctx_t>(ctx, _pd);
 
@@ -1397,13 +1394,14 @@ status_t brgemm_convolution_fwd_t<isa>::execute(
             btc.odb = odb;
             btc.ohb = ohb;
             btc.owb = owb;
-            btc.oscales = oscales;
             btc.src_zp_val = src_zero_points ? src_zero_points[0] : 0;
             btc.dst_zp_vals = dst_zero_points;
             btc.src_zp_comp_ptr
                     = jcp.src_zero_point ? src_zp_comp_base : nullptr;
             btc.s8s8_comp_ptr
                     = jcp.s8s8_compensation_required ? s8s8_comp_base : nullptr;
+            btc.src_scales = src_scales;
+            btc.wei_scales = wei_scales;
             btc.dst_scales = dst_scales;
 
             if (jcp.exec_type == exec_trans
@@ -1595,13 +1593,16 @@ void brgemm_convolution_fwd_t<isa>::perform_outwork(
     brgemm_kernel_post_ops_args_t p;
     if (do_postwork) {
         p.ptr_bias = (void *)(bias_w);
-        p.ptr_scales = (void *)(&btc.oscales[jcp.is_oc_scale * g_oc]);
         p.ptr_binary_post_ops_rhs
                 = btc.brgemm_ctx.post_ops_binary_rhs_arg_vec.data();
         p.dst_orig = btc.brgemm_ctx.dst;
         p.c_zp_values = btc.dst_zp_vals;
         p.a_comp_val = btc.src_zp_val;
-        p.ptr_dst_scales = (void *)btc.dst_scales;
+        p.ptr_src_scales = btc.src_scales;
+        p.ptr_wei_scales = btc.wei_scales
+                ? &btc.wei_scales[jcp.is_oc_scale * g_oc]
+                : nullptr;
+        p.ptr_dst_scales = btc.dst_scales;
     }
 
     auto call_outwork_ker = [&](bool is_postwork, bool has_postcomp,
@@ -1684,11 +1685,13 @@ inline void brgemm_convolution_fwd_t<isa>::call_brgemm_kernel(
                 : nullptr;
         const brgemm_post_ops_data_t post_ops_data {
                 static_cast<const char *>(bias_w),
-                &btc.oscales[jcp.is_oc_scale * g_oc],
                 btc.brgemm_ctx.post_ops_binary_rhs_arg_vec.data(),
                 static_cast<size_t>(g_oc), 0, btc.brgemm_ctx.dst, 0,
                 static_cast<void *>(src_zp_ptr), nullptr, btc.dst_zp_vals,
                 false, btc.src_zp_val, do_only_comp, do_only_pass_comp,
+                btc.src_scales,
+                btc.wei_scales ? &btc.wei_scales[jcp.is_oc_scale * g_oc]
+                               : nullptr,
                 btc.dst_scales};
 
         void *scratch = is_amx ? static_cast<void *>(btc.wsp_tile)
