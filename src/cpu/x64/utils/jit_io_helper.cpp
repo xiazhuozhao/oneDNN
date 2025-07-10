@@ -801,10 +801,9 @@ void jit_io_helper_t<Vmm>::store(const Vmm &src_raw_vmm,
 template <typename Vmm>
 void jit_io_helper_t<Vmm>::saturate(const Vmm &vmm) {
     assert(saturation_conf_.has_value() && "Config for saturation is not set.");
-
-    host_->sub(host_->rsp, 64);
-    host_->uni_vmovups(host_->ptr[host_->rsp], vmm);
-    host_->add(host_->rsp, 64);
+    host_->saturate_cvt_f32(vmm,
+            Vmm(saturation_conf_->vreg_zero_saturation_idx_),
+            Vmm(saturation_conf_->vreg_saturation_ubound_idx_), data_type_);
 }
 
 template <typename Vmm>
@@ -922,7 +921,6 @@ void jit_io_helper_t<Vmm>::store_i8(
             store_i8_fn(src_xmm, src_vmm);
             host_->uni_vmovntps(dst_addr, src_xmm);
         } else {
-            host_->vcvtps2dq(src_vmm, src_vmm);
             store_i8_fn(dst_addr, src_vmm);
         }
     }
