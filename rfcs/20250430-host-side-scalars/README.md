@@ -85,6 +85,56 @@ Cons:
 - Requires explicit support in each non-host implementation to handle host-side scalars
     correctly.
 
+#### Additional considerations for primitive descriptor creation
+
+For primitives such as matmul, and when using attributes like scales or zero
+points, we should also consider whether information about scales and zero
+points being host-side scalars should be available during primitive descriptor
+creation.
+
+With the option proposed above, to use a scaling factor as a host-side scalar,
+the user would do the following:
+```C
+// alpha is a host-side scalar
+memory alpha_m(memory::desc::host_scalar(memory::data_type::f32), 2.0f);
+
+// scaling factor is a single value to be applied to src
+primitive_attr attr;
+attr.set_scales_mask(DNNL_ARG_SRC, /* mask */ 0);
+
+// No info about scaling factor being host-side scalar is
+// passed to primitive descriptor creation as it is an attribute
+matmul::primitive_desc matmul_pd(
+    eng, a_mem.get_desc(), b_mem.get_desc(), c_mem.get_desc(), attr);
+matmul matmul_prim(matmul_pd);
+
+// Info about scaling factor being host-side scalar is only available at execute
+// since we pass it as a memory object
+std::unordered_map<int, memory> args = {
+    {DNNL_ARG_SRC, a_mem},
+    {DNNL_ARG_WEIGHTS, b_mem},
+    {DNNL_ARG_DST, c_mem},
+    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, alpha_m}
+};
+matmul_prim.execute(s, args);
+```
+
+**Option 1 (recommended):** Introduce new "set" APIs for scales and zero points:
+```C
+void dnnl::primitive_attr::set_host_scale(int arg);
+void dnnl::primitive_attr::set_host_zero_point(int arg);
+```
+This allows us to explicitly specify that the scaling factor or zero point
+is a host-side scalar for primitive descriptor creation.
+Which allows us to prepare a correct kernel that passes the value as a kernel parameter,
+exit early if host-side scalars are not supported for the implementation,
+as well as provide more verbose error messages in case of any failure.
+
+**Option 2:** Do not introduce new APIs. Kernels would have to support both
+`void *scalar_ptr` and `float scalar_value`, checking at runtime which to use.
+If host-side scalar is unsupported by the implementation, we would return
+an error during execution, which is less user-friendly.
+
 ## Other options considered
 
 ### Option 1: User to rely on USM `malloc_host` (no changes to oneDNN)
