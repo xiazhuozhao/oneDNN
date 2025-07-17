@@ -26,11 +26,6 @@
 #include <cstdint>
 #include <stdexcept>
 
-#ifdef NGEN_ENABLE_RA_DUMP
-#include <iostream>
-#include <iomanip>
-#endif
-
 namespace NGEN_NAMESPACE {
 
 // Gen registers are organized in banks of bundles.
@@ -179,8 +174,8 @@ public:
     inline bool isFree(GRFRange range) const;
     inline bool isFree(Subregister subreg) const;
 
-#ifdef NGEN_ENABLE_RA_DUMP
-    inline void dump(std::ostream &str);
+#ifdef NGEN_ASM
+    inline void dump(std::ostream &str) const;
 #endif
 
     // Deprecated snake case APIs.
@@ -658,8 +653,8 @@ FlagRegister RegisterAllocator::tryAllocFlag(bool sub)
     return FlagRegister();
 }
 
-#ifdef NGEN_ENABLE_RA_DUMP
-void RegisterAllocator::dump(std::ostream &str)
+#ifdef NGEN_ASM
+void RegisterAllocator::dump(std::ostream &str) const
 {
     str << "\n// Flag registers: ";
     for (int r = 0; r < FlagRegister::subcount(hw); r++)
@@ -696,7 +691,7 @@ void RegisterAllocator::dump(std::ostream &str)
 
     str << std::endl;
 }
-#endif /* NGEN_ENABLE_RA_DUMP */
+#endif /* NGEN_ASM */
 
 } /* namespace NGEN_NAMESPACE */
 
