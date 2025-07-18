@@ -76,9 +76,10 @@ static inline int format_type_checker(const char *, ...) {
 }
 
 #define UTILITY_CONST_EXPR_VALUE(exp) \
-    utility::const_expr_value_t<decltype(exp), exp>::value
+    dnnl::impl::utility::const_expr_value_t<decltype(exp), exp>::value
 
-#define __FILENAME__ (&__FILE__[utility::get_file_name_offset(__FILE__)])
+#define __FILENAME__ \
+    (&__FILE__[dnnl::impl::utility::get_file_name_offset(__FILE__)])
 
 // General formatting macro for verbose.
 // msg is typically a constant string pulled from verbose_msg.hpp
