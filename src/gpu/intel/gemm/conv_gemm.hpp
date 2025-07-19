@@ -21,14 +21,15 @@
 
 #include "gpu/gpu_gemm_pd.hpp"
 #include "gpu/gpu_resource.hpp"
+#include "gpu/intel/conv/jit.hpp"
 #include "gpu/intel/gemm/gpu_gemm.hpp"
-#include "gpu/intel/jit/conv/gen_convolution.hpp"
 #include "gpu/intel/primitive_conf.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
 struct conv_gemm_t : public gpu_gemm_t {
     using gpu_gemm_t::gpu_gemm_t;
@@ -184,8 +185,8 @@ struct conv_gemm_t : public gpu_gemm_t {
         return create_nested_primitive(conv_, pd()->conv_pd, engine);
     }
 
-    status_t execute(const gemm_exec_ctx_t &ctx) const override {
-        exec_args_t args;
+    status_t execute(const exec_ctx_t &ctx) const override {
+        impl::exec_args_t args;
         std::unique_ptr<memory_t, memory_deleter_t> a;
         CHECK(safe_ptr_assign(a,
                 new memory_t(ctx.stream()->engine(), pd()->conv_pd->src_md(0),
@@ -232,6 +233,7 @@ private:
     std::shared_ptr<impl::primitive_t> conv_;
 };
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

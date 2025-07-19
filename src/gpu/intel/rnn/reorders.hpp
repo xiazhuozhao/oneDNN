@@ -30,6 +30,7 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace rnn {
 
 struct rnn_weights_reorder_t : public gpu_primitive_t {
     using gpu_primitive_t::gpu_primitive_t;
@@ -131,6 +132,7 @@ private:
     enum { SCALES_ = 0 };
 };
 
+} // namespace rnn
 } // namespace intel
 } // namespace gpu
 } // namespace impl

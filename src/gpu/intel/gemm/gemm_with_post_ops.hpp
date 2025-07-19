@@ -25,6 +25,7 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
 struct gemm_with_post_ops_t : public gpu_gemm_t {
     using gpu_gemm_t::gpu_gemm_t;
@@ -72,7 +73,7 @@ struct gemm_with_post_ops_t : public gpu_gemm_t {
         return ret_status;
     }
 
-    status_t execute(const gemm_exec_ctx_t &ctx) const override;
+    status_t execute(const exec_ctx_t &ctx) const override;
 
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
@@ -81,6 +82,7 @@ private:
     compute::kernel_t subbyte_pack_kernel_;
 };
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

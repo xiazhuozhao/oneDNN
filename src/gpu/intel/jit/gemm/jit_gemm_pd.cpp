@@ -69,7 +69,7 @@ int quant_entry_ndims(
 }
 } // anonymous namespace
 
-status_t jit_gemm_pd_t::init_post_ops() {
+status_t gemm_pd_t::init_post_ops() {
     using namespace primitive_kind;
     using namespace alg_kind;
     using namespace data_type;
@@ -197,7 +197,7 @@ status_t jit_gemm_pd_t::init_post_ops() {
     return status::success;
 }
 
-bool jit_gemm_pd_t::dy_quant_enabled() {
+bool gemm_pd_t::dy_quant_enabled() {
     const auto d = desc();
     using namespace data_type;
     bool all_f8 = (utils::one_of(d->a_type(), f8_e5m2, f8_e4m3)
@@ -209,7 +209,7 @@ bool jit_gemm_pd_t::dy_quant_enabled() {
             || all_f8;
 }
 
-bool jit_gemm_pd_t::wei_decomp() {
+bool gemm_pd_t::wei_decomp() {
     const auto d = desc();
     using namespace data_type;
     return (utils::one_of(d->c_type(), f32, f16, bf16, f8_e5m2, f8_e4m3)
@@ -222,11 +222,11 @@ bool jit_gemm_pd_t::wei_decomp() {
             && attr()->mayiconvert(d->a_type(), f32);
 }
 
-bool jit_gemm_pd_t::quant_enabled() {
+bool gemm_pd_t::quant_enabled() {
     return wei_decomp() || dy_quant_enabled();
 }
 
-void jit_gemm_pd_t::init_attrs() {
+void gemm_pd_t::init_attrs() {
     wei_decomp_ = wei_decomp();
     dy_quant_enabled_ = dy_quant_enabled();
     quant_enabled_ = quant_enabled();
@@ -270,7 +270,7 @@ void jit_gemm_pd_t::init_attrs() {
     }
 }
 
-bool jit_gemm_pd_t::zp_ok() {
+bool gemm_pd_t::zp_ok() {
     auto &attr_zps = attr()->zero_points_;
     auto &a_zps = attr_zps.get(DNNL_ARG_A);
     auto &b_zps = attr_zps.get(DNNL_ARG_B);
@@ -328,7 +328,7 @@ bool jit_gemm_pd_t::zp_ok() {
     return true;
 }
 
-bool jit_gemm_pd_t::scales_ok() {
+bool gemm_pd_t::scales_ok() {
     const auto &a_scales = attr()->scales_.get(DNNL_ARG_A);
     const auto &b_scales = attr()->scales_.get(DNNL_ARG_B);
     int ndims = desc()->a_desc.ndims;
@@ -349,13 +349,13 @@ bool jit_gemm_pd_t::scales_ok() {
     return true;
 }
 
-bool jit_gemm_pd_t::valid_2d_mask(int mask, int ndims, bool per_tensor_ok) {
+bool gemm_pd_t::valid_2d_mask(int mask, int ndims, bool per_tensor_ok) {
     return (mask == full_tensor_mask() && per_tensor_ok)
             || utils::one_of(mask, (1 << (ndims - 1)),
                     (1 << (ndims - 1)) + (1 << (ndims - 2)));
 }
 
-dim_t jit_gemm_pd_t::ld_binary(int idx) const {
+dim_t gemm_pd_t::ld_binary(int idx) const {
     switch (binary_srcs_[idx].type) {
         case binary_src_t::binary: {
             const auto &entry = post_ops_.entry_[idx];
@@ -371,7 +371,7 @@ dim_t jit_gemm_pd_t::ld_binary(int idx) const {
     }
 }
 
-dim_t jit_gemm_pd_t::stride_binary(int idx, int stride) const {
+dim_t gemm_pd_t::stride_binary(int idx, int stride) const {
     switch (binary_srcs_[idx].type) {
         case binary_src_t::binary:
         case binary_src_t::scales:
@@ -387,7 +387,7 @@ dim_t jit_gemm_pd_t::stride_binary(int idx, int stride) const {
     }
 }
 
-dim_t jit_gemm_pd_t::stride_scale(int idx, int arg) const {
+dim_t gemm_pd_t::stride_scale(int idx, int arg) const {
     const auto md = arg == DNNL_ARG_A ? desc()->b_desc : desc()->a_desc;
     dim_t stride = 1;
     if (md.dims[idx] == 1) return 0;

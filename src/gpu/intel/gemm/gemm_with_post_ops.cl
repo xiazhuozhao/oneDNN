@@ -14,11 +14,11 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/intel/dispatch.h"
-#include "gpu/intel/ocl_io.h"
-#include "gpu/intel/ocl_math_utils.h"
-#include "gpu/intel/ocl_post_ops.h"
-#include "gpu/intel/ocl_types.h"
+#include "gpu/intel/include/dispatch.h"
+#include "gpu/intel/include/io.h"
+#include "gpu/intel/include/math_utils.h"
+#include "gpu/intel/include/post_ops.h"
+#include "gpu/intel/include/types.h"
 
 #undef SRC_OFF
 #define SRC_OFF(x0, x1, x2, x3, x4, x5) OFF_MD(SRC, x0, x1, x2, x3, x4, x5)

@@ -32,7 +32,7 @@ namespace jit {
 
 #define GEMM_MAX_PO 36
 
-struct jit_gemm_pd_t : public gpu_gemm_pd_t {
+struct gemm_pd_t : public gpu_gemm_pd_t {
     using gpu_gemm_pd_t::gpu_gemm_pd_t;
 
     struct binary_src_t {

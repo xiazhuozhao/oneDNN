@@ -20,6 +20,7 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
 status_t gemm_with_post_ops_t::pd_t::init(impl::engine_t *engine) {
     using namespace data_type;
@@ -215,10 +216,10 @@ void gemm_with_post_ops_t::pd_t::init_scratchpad() {
             gemm_pd_->scratchpad_registry());
 }
 
-status_t gemm_with_post_ops_t::execute(const gemm_exec_ctx_t &ctx) const {
+status_t gemm_with_post_ops_t::execute(const exec_ctx_t &ctx) const {
     std::unique_ptr<memory_t, memory_deleter_t> c_mem_before_po_worker;
     status_t exec_status;
-    gemm_exec_args_t g_args(ctx.args());
+    exec_args_t g_args(ctx.args());
 
     if (pd()->use_scratchpad()) {
         auto scratchpad = ctx.get_scratchpad_grantor().get_memory_storage(
@@ -231,14 +232,13 @@ status_t gemm_with_post_ops_t::execute(const gemm_exec_ctx_t &ctx) const {
 
         g_args.c = c_mem_before_po_worker->memory_storage();
     }
-    exec_ctx_t tmp_exec_ctx(ctx.stream());
+    impl::exec_ctx_t tmp_exec_ctx(ctx.stream());
     tmp_exec_ctx.set_resource_mapper(ctx.get_resource_mapper());
     tmp_exec_ctx.set_scratchpad_grantor(&ctx.get_scratchpad_grantor());
     nested_scratchpad_t g_ns(tmp_exec_ctx,
             memory_tracking::names::key_nested_multiple, gemm_prim_);
 
-    gemm_exec_ctx_t gemm_ex_ctx
-            = gemm_exec_ctx_t(ctx.stream(), g_args, ctx.desc());
+    exec_ctx_t gemm_ex_ctx = exec_ctx_t(ctx.stream(), g_args, ctx.desc());
     gemm_ex_ctx.set_resource_mapper(ctx.get_resource_mapper());
     gemm_ex_ctx.set_scratchpad_grantor(g_ns.grantor());
 
@@ -278,10 +278,11 @@ status_t gemm_with_post_ops_t::execute(const gemm_exec_ctx_t &ctx) const {
     repack_arg_list.set(3, 4);
     compute::range_t repack_gws((nelems * 4 + 7) / 8);
     compute::nd_range_t repack_nd_range(repack_gws);
-    return large_parallel_for(exec_ctx_t(ctx.stream()), repack_nd_range,
+    return large_parallel_for(impl::exec_ctx_t(ctx.stream()), repack_nd_range,
             subbyte_pack_kernel_, repack_arg_list, 4);
 };
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

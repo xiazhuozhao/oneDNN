@@ -15,8 +15,8 @@
 *******************************************************************************/
 
 #define DT_UNDEF
-#include "gpu/intel/dispatch.h"
-#include "gpu/intel/ocl_types.h"
+#include "gpu/intel/include/dispatch.h"
+#include "gpu/intel/include/types.h"
 
 #if IN_TYPE_F16 || OUT_TYPE_F16
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable

@@ -27,6 +27,7 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
 struct ref_gemm_jit_params_t
     : public trivially_serializable_t<ref_gemm_jit_params_t> {
@@ -247,13 +248,14 @@ struct ref_gemm_t : public gpu_gemm_t {
         return status::success;
     }
 
-    status_t execute(const gemm_exec_ctx_t &ctx) const override;
+    status_t execute(const exec_ctx_t &ctx) const override;
 
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
     compute::kernel_t kernel_;
 };
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

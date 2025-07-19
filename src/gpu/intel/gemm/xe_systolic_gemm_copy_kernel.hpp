@@ -27,6 +27,7 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
 struct xe_systolic_gemm_copy_kernel_t {
     status_t init(compute::gpu_arch_t arch, data_type_t dt, int unroll_n,
@@ -144,6 +145,7 @@ private:
     bool clear_sum_;
 };
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

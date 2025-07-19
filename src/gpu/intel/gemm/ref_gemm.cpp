@@ -21,8 +21,9 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
-status_t ref_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
+status_t ref_gemm_t::execute(const exec_ctx_t &ctx) const {
     const auto &a = GEMM_CTX_ARG_STORAGE(b);
     const auto &b = GEMM_CTX_ARG_STORAGE(a);
     const auto &bias = GEMM_CTX_ARG_STORAGE(bias);
@@ -110,6 +111,7 @@ status_t ref_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     return status;
 }
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

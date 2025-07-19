@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020-2024 Intel Corporation
+* Copyright 2020-2025 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -28,12 +28,13 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
+namespace gemm {
 
 #define GEMM_CTX_ARG_STORAGE(argument) \
     (ctx.args().argument ? *(ctx.args().argument) \
                          : dnnl::impl::memory_storage_t::empty_storage())
 
-struct gemm_exec_args_t {
+struct exec_args_t {
     const memory_storage_t *a = nullptr;
     const memory_storage_t *b = nullptr;
     const memory_storage_t *c = nullptr;
@@ -46,14 +47,14 @@ struct gemm_exec_args_t {
     const memory_storage_t *c_scales = nullptr;
     const memory_storage_t *sum_ab = nullptr;
     const memory_storage_t *sround_seed = nullptr;
-    exec_args_t exec_args;
+    impl::exec_args_t exec_args;
 };
 
-struct gemm_exec_ctx_t {
-    gemm_exec_ctx_t(impl::stream_t *stream, const gemm_exec_args_t &args,
+struct exec_ctx_t {
+    exec_ctx_t(impl::stream_t *stream, const exec_args_t &args,
             const gemm_desc_t *gemm_desc = nullptr)
         : stream_(stream), args_(args), gemm_desc_(gemm_desc) {}
-    gemm_exec_ctx_t(const exec_ctx_t &other, const gemm_exec_args_t &args,
+    exec_ctx_t(const impl::exec_ctx_t &other, const exec_args_t &args,
             const gemm_desc_t *gemm_desc = nullptr)
         : stream_(other.stream())
         , args_(args)
@@ -62,11 +63,11 @@ struct gemm_exec_ctx_t {
         , scratchpad_grantor_(other.grantor_handle()) {}
 
     impl::stream_t *stream() const { return stream_; }
-    const gemm_exec_args_t &args() const { return args_; }
+    const exec_args_t &args() const { return args_; }
     const gemm_desc_t *desc() const { return gemm_desc_; }
 
-    exec_ctx_t into_exec_ctx_t(exec_args_t &&args) const {
-        exec_ctx_t ctx(stream(), std::move(args));
+    impl::exec_ctx_t into_exec_ctx_t(impl::exec_args_t &&args) const {
+        impl::exec_ctx_t ctx(stream(), std::move(args));
         ctx.set_scratchpad_grantor(scratchpad_grantor_);
         ctx.set_resource_mapper(resource_mapper_);
         return ctx;
@@ -93,12 +94,13 @@ struct gemm_exec_ctx_t {
 
 private:
     impl::stream_t *stream_;
-    gemm_exec_args_t args_;
+    exec_args_t args_;
     const gemm_desc_t *gemm_desc_ = nullptr;
     const resource_mapper_t *resource_mapper_ = nullptr;
     const memory_tracking::grantor_t *scratchpad_grantor_ = nullptr;
 };
 
+} // namespace gemm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

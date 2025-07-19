@@ -24,7 +24,8 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace intel {
-namespace bn_lookup_table {
+namespace bnorm {
+namespace lookup_table {
 
 using namespace compute;
 
@@ -645,7 +646,8 @@ std::string params_t::str() const {
     return oss.str();
 }
 
-} // namespace bn_lookup_table
+} // namespace lookup_table
+} // namespace bnorm
 } // namespace intel
 } // namespace gpu
 } // namespace impl

@@ -15,8 +15,8 @@
 *******************************************************************************/
 
 #include "gpu/intel/gemm/ocl_gemm_attrs.h"
-#include "gpu/intel/ocl_post_ops.h"
-#include "gpu/intel/ocl_types.h"
+#include "gpu/intel/include/post_ops.h"
+#include "gpu/intel/include/types.h"
 
 void get_strides(int mask, long dim0, long dim1, long dim2, long *str0,
         long *str1, long *str2) {

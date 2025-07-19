@@ -27,10 +27,10 @@
 #include "gpu/intel/compute/compute_engine.hpp"
 #include "gpu/intel/compute/compute_stream.hpp"
 #include "gpu/intel/compute/kernel.hpp"
+#include "gpu/intel/compute/types_interop.hpp"
 #include "gpu/intel/gemm/gpu_gemm_exec_types.hpp"
 #include "gpu/intel/jit/generator_base.hpp"
 #include "gpu/intel/kernel_cache.hpp"
-#include "gpu/intel/types_interop.hpp"
 #include "xpu/context.hpp"
 #include "xpu/utils.hpp"
 
@@ -187,7 +187,7 @@ struct gpu_primitive_t : public gpu::primitive_t {
     }
 
     // TODO: use inheritance for exec_ctx_t to get rid of such places...
-    static status_t parallel_for(const gemm_exec_ctx_t &ctx,
+    static status_t parallel_for(const gemm::exec_ctx_t &ctx,
             const compute::nd_range_t &range, const compute::kernel_t &kernel,
             const compute::kernel_arg_list_t &arg_list) {
         auto compute_stream

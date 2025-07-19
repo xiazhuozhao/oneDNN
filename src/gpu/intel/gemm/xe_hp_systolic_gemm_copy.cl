@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/intel/ocl_math_utils.h"
+#include "gpu/intel/include/math_utils.h"
 
 // The attribute intel_reqd_workgroup_walk_order does not exist on all GPU
 // runtimes. Disabling warnings to enable -Werror in CI testing.
