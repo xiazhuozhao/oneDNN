@@ -992,86 +992,6 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
     return OK;
 }
 
-int scales_post_processing(dnn_mem_map_t &mem_map) {
-#if !defined(DNNL_EXPERIMENTAL_UKERNEL)
-    // Internal API has specific implementation details w.r.t. scales.
-    // If any of source or weights scales present in the descriptor, then the
-    // kernel expects to get a vector of 16 float values (v16) of "fused" scale
-    // values (src * wei) under the pointer passed in brgemm_post_ops_data_t
-    // struct.
-    // However, if weights scales is per channel, then the kernel expects just
-    // `N` values, even if `N < 16`.
-    // Same applies for a destination scale. Due to it's handled separately from
-    // source and weights, and must be a single value, it must be a v16 memory.
-    //
-    // To smoothly take care of this detail, the code below will **always**
-    // update WEIGHTS scale (even if they are not present) with a proper memory
-    // of 16 or N elements, depending on the case.
-    // It will update destination memory to contain 16 elements as well.
-
-    const bool has_src_scale
-            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
-    const bool has_wei_scale
-            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
-    const bool has_dst_scale
-            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
-
-    const auto replace_mem_to_v16 = [&](dnnl_data_type_t dt, int exec_arg,
-                                            float val) {
-        dims_t dims = {16};
-        auto new_md = dnn_mem_t::init_md(1, dims.data(), dt, tag::abx);
-        dnn_mem_t new_m(new_md, get_test_engine(), /* prefill = */ true);
-        if (!new_m.is_mapped()) new_m.map();
-        for (int64_t i = 0; i < new_m.nelems(); i++) {
-            new_m.set_elem(i, val);
-        }
-        mem_map[DNNL_ARG_ATTR_SCALES | exec_arg] = std::move(new_m);
-    };
-
-    if (has_wei_scale) {
-        const auto &wei_scales_m
-                = mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
-        // First, update the values...
-        if (has_src_scale) {
-            const auto &src_scales_m
-                    = mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
-            assert(src_scales_m.nelems() == 1);
-            const float src_val = src_scales_m.get_elem(0);
-            for (int64_t i = 0; i < wei_scales_m.nelems(); i++) {
-                float val = wei_scales_m.get_elem(i) * src_val;
-                wei_scales_m.set_elem(i, val);
-            }
-        }
-        // Second, update memory for a single scale.
-        if (wei_scales_m.nelems() == 1) {
-            replace_mem_to_v16(wei_scales_m.dt(), DNNL_ARG_WEIGHTS,
-                    wei_scales_m.get_elem(0));
-        }
-    } else if (has_src_scale) {
-        const auto &src_scales_m
-                = mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
-        assert(src_scales_m.nelems() == 1);
-        // Create a v16 weights scales memory and put src value there.
-        replace_mem_to_v16(
-                src_scales_m.dt(), DNNL_ARG_WEIGHTS, src_scales_m.get_elem(0));
-    }
-
-    if (has_dst_scale) {
-        const auto &dst_scales_m
-                = mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
-        assert(dst_scales_m.nelems() == 1);
-        // Create a v16 dst scales memory and bcast inversed dst value there.
-        replace_mem_to_v16(dst_scales_m.dt(), DNNL_ARG_DST,
-                1.f / dst_scales_m.get_elem(0));
-    }
-
-#else // !defined(DNNL_EXPERIMENTAL_UKERNEL)
-    // ukernel API takes split pointers for scales, no need to update them on
-    // user level.
-#endif
-    return OK;
-}
-
 int binary_post_op_preprocessing(
         std::vector<const void *> &binary_po_v, const dnn_mem_map_t &mem_map) {
     // Preprocessing must happen in two stages:
@@ -1182,11 +1102,17 @@ int doit(const prb_t *prb, res_t *res) {
     char *dst_ptr = (char *)mem_map.at(DNNL_ARG_DST);
     if (prb->use_dst_as_acc()) acc_ptr = dst_ptr;
 
-    SAFE(scales_post_processing(mem_map), WARN);
-
     std::vector<const void *> binary_po_v;
     SAFE(binary_post_op_preprocessing(binary_po_v, mem_map), WARN);
 
+    const void *src_scales_ptr
+            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC)
+            ? (const void *)mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC)
+            : nullptr;
+    const void *wei_scales_ptr
+            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS)
+            ? (const void *)mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS)
+            : nullptr;
     const float *dst_scales_ptr
             = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST)
             ? (const float *)mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST)
@@ -1207,11 +1133,6 @@ int doit(const prb_t *prb, res_t *res) {
         }
     }
 
-    // For internal API, scales are combined. See `scales_post_processing`.
-    const float *scales_ptr
-            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS)
-            ? (const float *)mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS)
-            : nullptr;
     const int32_t *dst_zp_ptr
             = mem_map.count(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST)
             ? (const int32_t *)mem_map.at(
@@ -1238,7 +1159,6 @@ int doit(const prb_t *prb, res_t *res) {
 
     namespace_impl::brgemm_post_ops_data_t post_ops_data(
             /* bias */ bia_dt_ptr,
-            /* scales */ scales_ptr,
             /* binary_post_ops_rhs */ binary_po_v.data(),
             /* oc_logical_off */ 0, /* dst_row_logical_off */ 0,
             // TODO: though the field is called `data_C_ptr_`, this is a
@@ -1253,6 +1173,8 @@ int doit(const prb_t *prb, res_t *res) {
             /* zp_a_val */ zp_a_val,
             /* do_only_comp */ false,
             /* do_only_zp_a_val */ false,
+            /* src_scales */ src_scales_ptr,
+            /* wei_scales */ wei_scales_ptr,
             /* dst_scales */ dst_scales_ptr);
 
     // Note: hardware lacking native s8s8 support expects compensation buffer
@@ -1294,14 +1216,6 @@ int doit(const prb_t *prb, res_t *res) {
                      attr_params, binary_po_v.data()),
             WARN);
 
-    const void *src_scales_ptr
-            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC)
-            ? (const void *)mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC)
-            : nullptr;
-    const void *wei_scales_ptr
-            = mem_map.count(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS)
-            ? (const void *)mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS)
-            : nullptr;
     DNN_SAFE(dnnl_ukernel_attr_params_set_A_scales(attr_params, src_scales_ptr),
             WARN);
     DNN_SAFE(dnnl_ukernel_attr_params_set_B_scales(attr_params, wei_scales_ptr),

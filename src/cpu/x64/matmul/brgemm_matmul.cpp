@@ -373,8 +373,8 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
 
     auto scratchpad = scratchpad_registry().registrar();
     init_scratchpad(scratchpad, bgmmc_);
-    const auto wei_scale_count = bgmmc_.is_oscale_per_k
-            ? (bgmmc_.is_oscale_per_n ? N() * K() : K())
+    const auto wei_scale_count = bgmmc_.is_wei_scale_per_k
+            ? (bgmmc_.is_wei_scale_per_n ? N() * K() : K())
             : N();
     book_precomputed_scales(scratchpad, attr()->scales_, wei_scale_count,
             /* scale_adjust_factor = */ 1.f, bgmmc_.req_transpose_scales);
@@ -450,53 +450,19 @@ status_t brgemm_matmul_t<isa>::init(engine_t *engine) {
         CHECK(sparse_decompress_kernel_->create_kernel());
     }
 
-    // JIT to precompute scales
-    // TODO: enable transpose in JIT scales
-    const bool is_jit_supported = mayiuse(avx512_core);
-    const auto attr = pd()->attr();
-    const auto &attr_scales = attr->scales_;
-    const auto wei_scale_count = bgmmc.is_oscale_per_k
-            ? (bgmmc.is_oscale_per_n ? pd()->N() * pd()->K() : pd()->K())
-            : pd()->N();
-    if (is_jit_supported && wei_scale_count > 1 && req_copy_scales(attr_scales)
-            && !bgmmc.req_transpose_scales) {
-        int wei_scale_mask = attr_scales.get_mask(DNNL_ARG_WEIGHTS);
-        if (wei_scale_mask > 0) {
-            CHECK(safe_ptr_assign(jit_scale_precompute_,
-                    new jit_avx512_core_scale_precompute_t(attr)));
-            CHECK(jit_scale_precompute_->create_kernel());
-        }
-    }
-
     return status::success;
 }
 
 template <cpu_isa_t isa>
 status_t brgemm_matmul_t<isa>::execute_body(const exec_ctx_t &ctx) const {
-    DEFINE_ARG_SCALES_BUFFER(src_scales, DNNL_ARG_SRC);
-    DEFINE_ARG_SCALES_BUFFER(wei_scales, DNNL_ARG_WEIGHTS);
-    DEFINE_ARG_SCALES_BUFFER(dst_scales, DNNL_ARG_DST);
-
     const auto src_d = ctx.memory_mdw(DNNL_ARG_SRC, pd()->src_md());
     const auto weights_d = ctx.memory_mdw(DNNL_ARG_WEIGHTS, pd()->weights_md());
     const auto dst_d = ctx.memory_mdw(DNNL_ARG_DST, pd()->dst_md());
     matmul_helper_t helper(src_d, weights_d, dst_d);
 
+    brg_matmul_exec_ctx_t brgmm_ctx(ctx, pd(), helper);
+
     const auto &bgmmc = pd()->get_brgemm_matmul_conf();
-    const bool has_wei_scales
-            = !pd()->attr()->scales_.has_default_values(DNNL_ARG_WEIGHTS);
-    const int wei_scale_mask = pd()->attr()->scales_.get_mask(DNNL_ARG_WEIGHTS);
-    const bool wei_scale_per_k
-            = has_wei_scales && (wei_scale_mask & pd()->wei_qmask_K());
-    const bool wei_scale_per_n
-            = has_wei_scales && (wei_scale_mask & pd()->wei_qmask_N());
-    const float *oscales = scale_utils::precompute_scales(
-            ctx.get_scratchpad_grantor(), src_scales, wei_scales, pd()->K(),
-            pd()->N(), wei_scale_per_k, wei_scale_per_n, pd()->attr(),
-            jit_scale_precompute_.get(), 1.f, bgmmc.req_transpose_scales);
-
-    brg_matmul_exec_ctx_t brgmm_ctx(ctx, pd(), oscales, dst_scales, helper);
-
     const bool use_buffer_a
             = bgmmc.use_buffer_a || bgmmc.use_buffer_a_tail_only;
     const bool is_amx = is_superset(isa, avx512_core_amx);
@@ -720,14 +686,15 @@ void brgemm_matmul_t<isa>::compute_kernel(
             const char *dst_anchor_point = brgmm_ctx.get_data_C_ptr(0, 0, 0);
             const brgemm_post_ops_data_t post_ops_data {
                     static_cast<const void *>(ptr_bias),
-                    brgmm_ctx.get_oscales_ptr(n),
                     post_ops_binary_rhs_arg_vec.data(), static_cast<size_t>(n),
                     dst_row_logical_off, dst_anchor_point,
                     first_mb_matrix_addr_off,
                     static_cast<const void *>(zp_comp_a),
                     static_cast<const void *>(zp_comp_b),
                     static_cast<const void *>(zp_c_val_ptr), false, 1, false,
-                    false, brgmm_ctx.get_dst_scales_ptr()};
+                    false, brgmm_ctx.get_src_scales_ptr(),
+                    brgmm_ctx.get_wei_scales_ptr(n),
+                    brgmm_ctx.get_dst_scales_ptr()};
             brgemm_kernel_execute_postops(brg_kernel, gemm_batch, addr_batch,
                     (void *)ptr_C, (void *)ptr_D, post_ops_data, scratch,
                     &leading_dimensions);
@@ -775,14 +742,15 @@ void brgemm_matmul_t<isa>::compute_kernel(
             const char *dst_anchor_point = brgmm_ctx.get_data_C_ptr(0, 0, 0);
             const brgemm_post_ops_data_t post_ops_data {
                     static_cast<const void *>(ptr_bias),
-                    brgmm_ctx.get_oscales_ptr(n),
                     post_ops_binary_rhs_arg_vec.data(), static_cast<size_t>(n),
                     dst_row_logical_off, dst_anchor_point,
                     first_mb_matrix_addr_off,
                     static_cast<const void *>(zp_comp_a),
                     static_cast<const void *>(zp_comp_b),
                     static_cast<const void *>(zp_c_val_ptr), false, 1, false,
-                    false, brgmm_ctx.get_dst_scales_ptr()};
+                    false, brgmm_ctx.get_src_scales_ptr(),
+                    brgmm_ctx.get_wei_scales_ptr(n),
+                    brgmm_ctx.get_dst_scales_ptr()};
 
             brgemm_kernel_execute_postops(brg_kernel_k_tail, 1, addr_batch,
                     (void *)ptr_C, (void *)ptr_D, post_ops_data, scratch,
@@ -1082,7 +1050,6 @@ void brgemm_matmul_t<isa>::maybe_reduce_partial_results_and_apply_postops(
                                 = brgmm_ctx.get_data_C_ptr(0, 0, 0);
                         const brgemm_post_ops_data_t post_ops_data {
                                 static_cast<const void *>(ptr_bias),
-                                brgmm_ctx.get_oscales_ptr(n),
                                 post_ops_binary_rhs_arg_vec.data(),
                                 static_cast<size_t>(n), dst_row_logical_off,
                                 dst_anchor_point, first_mb_matrix_addr_off,
@@ -1090,6 +1057,8 @@ void brgemm_matmul_t<isa>::maybe_reduce_partial_results_and_apply_postops(
                                 static_cast<const void *>(zp_comp_b),
                                 static_cast<const void *>(zp_c_val_ptr),
                                 skip_accumulation, 1, false, false,
+                                brgmm_ctx.get_src_scales_ptr(),
+                                brgmm_ctx.get_wei_scales_ptr(n),
                                 brgmm_ctx.get_dst_scales_ptr()};
 
                         brgemm_kernel_execute_postops(brg_kernel, 0, nullptr,
@@ -1203,7 +1172,8 @@ void brgemm_matmul_t<isa>::copy_b_chunk_in_buffer(
         ctx.current_K_iters = nstl::min(bgmmc.K_blk, bgmmc.K);
         ctx.current_K_pad = brgmm_ctx.get_current_K_pad(ctx.current_K_iters);
 
-        ctx.scales_ptr = (void *)brgmm_ctx.get_oscales_ptr(n, k);
+        ctx.src_scales_ptr = brgmm_ctx.get_src_scales_ptr();
+        ctx.wei_scales_ptr = brgmm_ctx.get_wei_scales_ptr(n, k);
         if (bgmmc.blocked_B && !bgmmc.is_f16_with_int_wei
                 && isa == avx512_core_fp16) {
             cvt_float16_to_float((float *)ctx.tr_src, (float16_t *)ctx.src,
@@ -1223,7 +1193,8 @@ void brgemm_matmul_t<isa>::copy_b_chunk_in_buffer(
         ctx.current_K_start = k;
         ctx.current_K_iters = bgmmc.K % bgmmc.K_blk;
         ctx.current_K_pad = brgmm_ctx.get_current_K_pad(ctx.current_K_iters);
-        ctx.scales_ptr = (void *)brgmm_ctx.get_oscales_ptr(n, k);
+        ctx.src_scales_ptr = brgmm_ctx.get_src_scales_ptr();
+        ctx.wei_scales_ptr = brgmm_ctx.get_wei_scales_ptr(n, k);
         if (bgmmc.blocked_B && !bgmmc.is_f16_with_int_wei
                 && isa == avx512_core_fp16) {
             cvt_float16_to_float((float *)ctx.tr_src, (float16_t *)ctx.src,
@@ -1250,7 +1221,6 @@ void brgemm_matmul_t<isa>::accumulate(
 template <cpu_isa_t isa>
 struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
     brg_matmul_exec_ctx_t(const exec_ctx_t &ctx, const pd_t *pd,
-            const float *oscales, const float *dst_scales,
             matmul_helper_t &helper)
         : bgmmc_(pd->get_brgemm_matmul_conf())
         , src_d_(pd->src_md())
@@ -1297,11 +1267,20 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
                         dst_zero_points, 0)
                 : 0;
 
-        oscales_ptr_ = oscales;
-        dst_scales_ptr_ = dst_scales;
         memory_tracking::grantor_t scratchpad = ctx.get_scratchpad_grantor();
 
         const auto &bgmmc = pd->get_brgemm_matmul_conf();
+
+        src_scales_ = CTX_IN_MEM(
+                const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
+        wei_scales_ = CTX_IN_MEM(
+                const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
+        wei_scales_tr_ = bgmmc.req_transpose_scales
+                        || bgmmc_.wei_scales_k_group_size > 1
+                ? scratchpad.template get<float>(key_precomputed_scales)
+                : nullptr;
+        dst_scales_ = CTX_IN_MEM(
+                const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
 
         batch_element_ptr_ = scratchpad.template get<brgemm_batch_element_t>(
                 key_brgemm_primitive_batch);
@@ -1926,18 +1905,62 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
                 + n_blk_local * bgmmc_.s8s8_comp_n_str;
     }
 
-    const float *get_oscales_ptr(int n, int k = 0) const {
-        const auto offset = bgmmc_.req_transpose_scales
-                ? bgmmc_.is_oscale_per_k * k
-                        + (bgmmc_.is_oscale_per_n * n
-                                * (bgmmc_.is_oscale_per_k ? bgmmc_.K : 1))
-                : bgmmc_.is_oscale_per_n * n
-                        + (bgmmc_.is_oscale_per_k * k
-                                * (bgmmc_.is_oscale_per_n ? bgmmc_.N : 1));
-        return oscales_ptr_ + offset;
+    const void *get_src_scales_ptr() const { return src_scales_; }
+
+    const void *get_wei_scales_ptr(int n, int k = 0) const {
+        const auto gK = bgmmc_.wei_scales_k_group_size;
+
+        const auto in_stride_n = bgmmc_.is_wei_scale_per_n ? 1 : 0;
+        const auto in_stride_k = bgmmc_.is_wei_scale_per_k
+                ? (bgmmc_.is_wei_scale_per_n ? bgmmc_.N : 1)
+                : 0;
+        const auto offset = n * in_stride_n + (k / gK) * in_stride_k;
+        const auto *ptr = reinterpret_cast<const char *const>(wei_scales_)
+                + offset * bgmmc_.wei_scales_dt_sz;
+
+        if (bgmmc_.req_transpose_scales) {
+            // Transpose case covers grouped and non-grouped scenarios.
+            const auto in_tr_stride_n = bgmmc_.is_wei_scale_per_n
+                    ? (bgmmc_.is_wei_scale_per_k ? bgmmc_.K : 1)
+                    : 0;
+            const auto in_tr_stride_k = bgmmc_.is_wei_scale_per_k ? 1 : 0;
+            const auto offset_tr = k * in_tr_stride_k + n * in_tr_stride_n;
+            auto *ptr_tr = reinterpret_cast<char *const>(wei_scales_tr_)
+                    + offset_tr * bgmmc_.wei_scales_dt_sz;
+
+            for_(int kk = 0; kk < nstl::min(bgmmc_.K - k, bgmmc_.K_blk); kk++)
+            for (int nn = 0; nn < nstl::min(bgmmc_.N - n, bgmmc_.N_blk); nn++) {
+                const auto in_idx = nn * in_stride_n + (kk / gK) * in_stride_k;
+                const auto out_idx = nn * bgmmc_.K + kk;
+                const float wei_scales_val = cpu::io::load_float_value(
+                        bgmmc_.wei_scales_dt, ptr, in_idx);
+                cpu::io::store_float_value(
+                        bgmmc_.wei_scales_dt, wei_scales_val, ptr_tr, out_idx);
+            }
+
+            return ptr_tr;
+        } else if (gK > 1) {
+            // Plain case requires extra memory only for grouped scales.
+            const auto offset_non_g = n * in_stride_n + k * in_stride_k;
+            auto *ptr_non_g = reinterpret_cast<char *const>(wei_scales_tr_)
+                    + offset_non_g * bgmmc_.wei_scales_dt_sz;
+
+            for_(int kk = 0; kk < nstl::min(bgmmc_.K - k, bgmmc_.K_blk); kk++)
+            for (int nn = 0; nn < nstl::min(bgmmc_.N - n, bgmmc_.N_blk); nn++) {
+                const auto in_idx = nn * in_stride_n + (kk / gK) * in_stride_k;
+                const auto out_idx = nn * in_stride_n + kk * in_stride_k;
+                const float wei_scales_val = cpu::io::load_float_value(
+                        bgmmc_.wei_scales_dt, ptr, in_idx);
+                cpu::io::store_float_value(bgmmc_.wei_scales_dt, wei_scales_val,
+                        ptr_non_g, out_idx);
+            }
+
+            return ptr_non_g;
+        }
+        return ptr;
     }
 
-    const float *get_dst_scales_ptr() const { return dst_scales_ptr_; }
+    const void *get_dst_scales_ptr() const { return dst_scales_; }
 
     const int32_t *get_zp_a_neg_val_ptr() const {
         return &zero_point_a_negative_val_;
@@ -2287,8 +2310,15 @@ private:
 
     char *wsp_tile_ptr_;
     const char *bias_ptr_;
-    const float *oscales_ptr_;
-    const float *dst_scales_ptr_;
+    const void *src_scales_;
+    const void *wei_scales_;
+    // This pointer is coming from scratchpad and is needed to expand (K/g)xN
+    // scales to KxN scales as copy_B kernels highly rely on the full register
+    // scales for weights decompression feature.
+    // TODO: re-implement kernels to avoid this pointer and the overhead around
+    // filling that bigger buffer.
+    void *wei_scales_tr_;
+    const float *dst_scales_;
     int32_t *s8s8_compensation_ptr_;
 
     int32_t *zero_point_a_compensations_ptr_;
