@@ -20,6 +20,7 @@
 #include <assert.h>
 
 #include "common/c_types_map.hpp"
+#include "common/host_scalar_memory_storage.hpp"
 #include "common/memory_tracking.hpp"
 #include "common/primitive.hpp"
 #include "common/type_helpers.hpp"
@@ -226,6 +227,8 @@ struct ref_matmul_t : public gpu_primitive_t {
             kernel_ctx.define_int("NDIMS", ndims);
         }
         kernel_ctx.define_int("RUNTIME_DIMS", runtime_dims);
+        kernel_ctx.define_int(
+                "WITH_HOST_SCALE", pd()->attr()->scales_.is_host_scalar());
 
         def_data_type(kernel_ctx, pd()->src_dt_, "SRC");
         def_data_type(kernel_ctx, pd()->wei_dt_, "WEI");

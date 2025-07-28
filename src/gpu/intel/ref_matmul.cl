@@ -41,13 +41,27 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
         long src_zp_group_k, __global WEI_ZP_DATA_T *b0, long wei_zp_stride_n,
         long wei_zp_stride_k, long wei_zp_stride_d0, long wei_zp_stride_d1,
         long wei_zp_group_n, long wei_zp_group_k, __global int *c0,
-        __global SRC_SCALES_DATA_T *src_scales, long src_scale_stride_k,
-        long src_scale_stride_m, long src_scale_stride_d0,
-        long src_scale_stride_d1, long src_scale_group_k,
-        __global WEI_SCALES_DATA_T *wei_scales, long wei_scale_stride_n,
-        long wei_scale_stride_k, long wei_scale_stride_d0,
-        long wei_scale_stride_d1, long wei_scale_group_n,
-        long wei_scale_group_k, __global DST_SCALES_DATA_T *dst_scales,
+#if WITH_HOST_SCALE
+        float src_scale_value,
+#else
+        __global SRC_SCALES_DATA_T *src_scales,
+#endif
+        long src_scale_stride_k, long src_scale_stride_m,
+        long src_scale_stride_d0, long src_scale_stride_d1,
+        long src_scale_group_k,
+#if WITH_HOST_SCALE
+        float wei_scale_value,
+#else
+        __global WEI_SCALES_DATA_T *wei_scales,
+#endif
+        long wei_scale_stride_n, long wei_scale_stride_k,
+        long wei_scale_stride_d0, long wei_scale_stride_d1,
+        long wei_scale_group_n, long wei_scale_group_k,
+#if WITH_HOST_SCALE
+        float dst_scale_value,
+#else
+        __global DST_SCALES_DATA_T *dst_scales,
+#endif
         long group_K, long K, long N, long M, long D0, long D1, long D2,
         long bia_stride_d3, long bia_stride_d2, long bia_stride_d1,
         long bia_stride_d0, long bia_stride_m, long bia_stride_n,
@@ -162,16 +176,24 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
             FLT_ACC_DATA_T src_scale = 1.f;
             FLT_ACC_DATA_T wei_scale = 1.f;
 #if WITH_SRC_SCALES
+#if WITH_HOST_SCALE
+            src_scale = SRC_SCALES_TO_REF(src_scale_value);
+#else
             long src_scale_off = src_scale_stride_m * m
                     + src_scale_stride_k * (g * group_K / src_scale_group_k)
                     + src_scale_stride_d0 * d0 + src_scale_stride_d1 * d1;
             src_scale = SRC_SCALES_TO_REF(src_scales[src_scale_off]);
 #endif
+#endif
 #if WITH_WEI_SCALES
+#if WITH_HOST_SCALE
+            wei_scale = WEI_SCALES_TO_REF(wei_scale_value);
+#else
             long wei_scale_off = wei_scale_stride_n * (n / wei_scale_group_n)
                     + wei_scale_stride_k * (g * group_K / wei_scale_group_k)
                     + wei_scale_stride_d0 * d0 + wei_scale_stride_d1 * d1;
             wei_scale = WEI_SCALES_TO_REF(wei_scales[wei_scale_off]);
+#endif
 #endif
             FLT_ACC_DATA_T acc_g_to_f
                     = ACC_TO_REF(acc_g) * src_scale * wei_scale;
@@ -233,7 +255,11 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
 
 #if WITH_DST_SCALES
 #if DST_SCALES_MASK == 0
+#if WITH_HOST_SCALE
+        po_acc /= DST_SCALES_TO_REF(dst_scale_value);
+#else
         po_acc /= DST_SCALES_TO_REF(dst_scales[0]);
+#endif
 #else
         po_acc /= DST_SCALES_TO_REF(dst_scales[n]);
 #endif
