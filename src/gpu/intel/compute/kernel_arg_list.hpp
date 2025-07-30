@@ -24,6 +24,7 @@
 
 #include "common/bfloat16.hpp"
 #include "common/float16.hpp"
+#include "common/host_scalar_memory_storage.hpp"
 #include "common/memory_storage.hpp"
 #include "common/nstl.hpp"
 
@@ -261,6 +262,21 @@ public:
         assert(index < storage_size);
         if ((index + 1) > nargs()) { args_.resize(index + 1); };
         args_[index].set_value(size, nullptr);
+    }
+
+    template <typename T>
+    void set_mem_or_host_scalar(int index, const memory_storage_t &storage) {
+        assert(index < storage_size);
+        if ((index + 1) > nargs()) { args_.resize(index + 1); };
+        auto host_scalar
+                = dynamic_cast<const host_scalar_memory_storage_t *>(&storage);
+        if (host_scalar) {
+            T value = 0;
+            host_scalar->get_scalar_value(&value, sizeof(value));
+            args_[index].set_value(value, unused_storage);
+        } else {
+            args_[index].set_value(storage);
+        }
     }
 
     int nargs() const { return static_cast<int>(args_.size()); }

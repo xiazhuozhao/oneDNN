@@ -37,11 +37,25 @@ uint get_dropout_threshold(float p) {
 
 __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
         __global DST_DATA_T *C, __global BIA_DATA_T *bia,
-        __global SRC_ZP_DATA_T *a0, long src_zp_stride_k, long src_zp_stride_m,
-        long src_zp_group_k, __global WEI_ZP_DATA_T *b0, long wei_zp_stride_n,
-        long wei_zp_stride_k, long wei_zp_stride_d0, long wei_zp_stride_d1,
-        long wei_zp_group_n, long wei_zp_group_k, __global int *c0,
-#if WITH_HOST_SCALE
+#if HOST_SRC_ZP
+        int src_zp_value,
+#else
+        __global SRC_ZP_DATA_T *a0,
+#endif
+        long src_zp_stride_k, long src_zp_stride_m, long src_zp_group_k,
+#if HOST_WEI_ZP
+        int wei_zp_value,
+#else
+        __global WEI_ZP_DATA_T *b0,
+#endif
+        long wei_zp_stride_n, long wei_zp_stride_k, long wei_zp_stride_d0,
+        long wei_zp_stride_d1, long wei_zp_group_n, long wei_zp_group_k,
+#if HOST_DST_ZP
+        int dst_zp_value,
+#else
+        __global int *c0,
+#endif
+#if HOST_SRC_SCALE
         float src_scale_value,
 #else
         __global SRC_SCALES_DATA_T *src_scales,
@@ -49,7 +63,7 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
         long src_scale_stride_k, long src_scale_stride_m,
         long src_scale_stride_d0, long src_scale_stride_d1,
         long src_scale_group_k,
-#if WITH_HOST_SCALE
+#if HOST_WEI_SCALE
         float wei_scale_value,
 #else
         __global WEI_SCALES_DATA_T *wei_scales,
@@ -57,7 +71,7 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
         long wei_scale_stride_n, long wei_scale_stride_k,
         long wei_scale_stride_d0, long wei_scale_stride_d1,
         long wei_scale_group_n, long wei_scale_group_k,
-#if WITH_HOST_SCALE
+#if HOST_DST_SCALE
         float dst_scale_value,
 #else
         __global DST_SCALES_DATA_T *dst_scales,
@@ -95,7 +109,11 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
     int mb = get_global_id(2);
 
 #if WITH_DST_ZPOINTS
+#if HOST_DST_ZP
+    int dst_zp = dst_zp_value;
+#else
     int dst_zp = c0[0];
+#endif
 #else
     int dst_zp = 0;
 #endif
@@ -147,16 +165,24 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
 #endif
                 int wei_zp = 0;
 #if WITH_WEI_ZPOINTS
+#if HOST_WEI_ZP
+                wei_zp = WEI_ZP_TO_REF(wei_zp_value, 0);
+#else
                 long wei_zp_off = wei_zp_stride_n * (n / wei_zp_group_n)
                         + wei_zp_stride_k * (k / wei_zp_group_k)
                         + wei_zp_stride_d0 * d0 + wei_zp_stride_d1 * d1;
                 wei_zp = WEI_ZP_TO_REF(b0, wei_zp_off);
 #endif
+#endif
                 int src_zp = 0;
 #if WITH_SRC_ZPOINTS
+#if HOST_SRC_ZP
+                src_zp = SRC_ZP_TO_REF(src_zp_value, 0);
+#else
                 long src_zp_off = src_zp_stride_k * (k / src_zp_group_k)
                         + src_zp_stride_m * m;
                 src_zp = SRC_ZP_TO_REF(a0, src_zp_off);
+#endif
 #endif
 #if SRC_DT_F4_E2M1 || SRC_DT_F4_E3M0
                 ACC_DATA_T s = TO_ACC(
@@ -176,7 +202,7 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
             FLT_ACC_DATA_T src_scale = 1.f;
             FLT_ACC_DATA_T wei_scale = 1.f;
 #if WITH_SRC_SCALES
-#if WITH_HOST_SCALE
+#if HOST_SRC_SCALE
             src_scale = SRC_SCALES_TO_REF(src_scale_value);
 #else
             long src_scale_off = src_scale_stride_m * m
@@ -186,7 +212,7 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
 #endif
 #endif
 #if WITH_WEI_SCALES
-#if WITH_HOST_SCALE
+#if HOST_WEI_SCALE
             wei_scale = WEI_SCALES_TO_REF(wei_scale_value);
 #else
             long wei_scale_off = wei_scale_stride_n * (n / wei_scale_group_n)
@@ -255,7 +281,7 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
 
 #if WITH_DST_SCALES
 #if DST_SCALES_MASK == 0
-#if WITH_HOST_SCALE
+#if HOST_DST_SCALE
         po_acc /= DST_SCALES_TO_REF(dst_scale_value);
 #else
         po_acc /= DST_SCALES_TO_REF(dst_scales[0]);
