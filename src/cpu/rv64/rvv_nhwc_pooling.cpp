@@ -21,11 +21,8 @@
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
+#include "common/nstl.hpp"
 #include "cpu/rv64/rvv_nhwc_pooling.hpp"
-
-#ifndef __FLT16_MAX__
-#define __FLT16_MAX__ 65504.0f16
-#endif
 
 namespace dnnl {
 namespace impl {
@@ -275,13 +272,16 @@ static void MaxPooling_f16(const void *src_raw, void *dst_raw,
                 const int ih_end = std::min(oh_offset + (int)kerH, (int)inH);
                 const int iw_end = std::min(ow_offset + (int)kerW, (int)inW);
 
+                const float f16_lowest = (float)
+                        nstl::numeric_limits<dnnl::impl::float16_t>::lowest();
+
                 if (id_start >= id_end || ih_start >= ih_end
                         || iw_start >= iw_end) {
                     size_t oc = 0;
                     while (oc < (size_t)channels) {
                         size_t vl = __riscv_vsetvl_e16m1((size_t)channels - oc);
-                        vfloat16m1_t vfill
-                                = __riscv_vfmv_v_f_f16m1(-__FLT16_MAX__, vl);
+                        vfloat16m1_t vfill = __riscv_vfmv_v_f_f16m1(
+                                (_Float16)f16_lowest, vl);
                         // vfill = postops_handler.apply(vfill, vl); // TODO: f16 postops
                         __riscv_vse16_v_f16m1(
                                 (_Float16 *)&dst[dst_spatial_base + oc], vfill,
@@ -295,7 +295,7 @@ static void MaxPooling_f16(const void *src_raw, void *dst_raw,
                 while (oc < (size_t)channels) {
                     size_t vl = __riscv_vsetvl_e16m1((size_t)channels - oc);
                     vfloat16m1_t vmax
-                            = __riscv_vfmv_v_f_f16m1(-__FLT16_MAX__, vl);
+                            = __riscv_vfmv_v_f_f16m1((_Float16)f16_lowest, vl);
 
                     for (int id = id_start; id < id_end; ++id) {
                         for (int ih = ih_start; ih < ih_end; ++ih) {
