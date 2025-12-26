@@ -21,6 +21,7 @@
 #include "common/primitive.hpp"
 #include "cpu/cpu_pooling_pd.hpp"
 #include "cpu/rv64/rvv_postops.hpp"
+#include "cpu/rv64/jit_rvv_nchw_pool_kernel.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -34,54 +35,59 @@ struct riscv_nchw_pooling_fwd_t : public primitive_t {
         DECLARE_COMMON_PD_T_("RISCV64GCV", riscv_nchw_pooling_fwd_t)
 
         status_t init(engine_t *engine) {
-            UNUSED(engine);
-
-            const format_tag_t desired_fmt_tag = utils::pick(ndims() - 3,
-                    format_tag::ncw, format_tag::nchw, format_tag::ncdhw);
+            const bool is_f16 = src_md()->data_type == data_type::f16;
 
             VDISPATCH_POOLING(desc_.prop_kind == prop_kind::forward_inference,
                     VERBOSE_BAD_PROPKIND);
+            
             VDISPATCH_POOLING(
                     utils::one_of(desc()->alg_kind, alg_kind::pooling_max,
                             alg_kind::pooling_avg_include_padding,
                             alg_kind::pooling_avg_exclude_padding),
                     VERBOSE_BAD_ALGORITHM);
-            VDISPATCH_POOLING(set_default_params() == status::success,
-                    VERBOSE_UNSUPPORTED_TAG);
-            VDISPATCH_POOLING(memory_desc_wrapper(dst_md()).is_dense(false),
-                    VERBOSE_UNSUPPORTED_SPARSE_CFG);
-            static constexpr data_type_t d_type = data_type::f32;
-            const bool types_ok = src_md()->data_type == d_type
-                    && dst_md()->data_type == d_type;
-            VDISPATCH_POOLING(types_ok, VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_POOLING(!has_zero_dim_memory(), VERBOSE_EMPTY_TENSOR, "");
-            VDISPATCH_POOLING(!is_dilated(), VERBOSE_UNSUPPORTED_FEATURE,
-                    "does not support dilations");
-            using sm = primitive_attr_t::skip_mask_t;
-            VDISPATCH_POOLING(attr()->has_default_values(sm::post_ops),
-                    VERBOSE_UNSUPPORTED_ATTR);
 
-            if (!attr()->post_ops_.has_default_values()) {
-                const auto &po = attr()->post_ops_;
-                const bool ok = (po.len() == 1)
-                        && (po.entry_[0].is_binary()
-                                || po.entry_[0].is_eltwise());
-                VDISPATCH_POOLING(ok, VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_POOLING(utils::one_of(src_md()->data_type, data_type::f32,
+                                      data_type::f16),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_POOLING(src_md()->data_type == dst_md()->data_type,
+                    VERBOSE_UNSUPPORTED_DT);
+
+            if (is_f16) {
+                VDISPATCH_POOLING(DNNL_RISCV_USE_ZVFH_INTRINSICS,
+                        VERBOSE_UNSUPPORTED_ISA);
+                VDISPATCH_POOLING(
+                        platform::has_data_type_support(data_type::f16),
+                        VERBOSE_UNSUPPORTED_DT);
+                if (!attr()->post_ops_.has_default_values())
+                    return status::unimplemented;
             }
+
+            CHECK(set_default_params());
+
+            const format_tag_t desired_fmt_tag = utils::pick(ndims() - 3,
+                    format_tag::ncw, format_tag::nchw, format_tag::ncdhw);
+            
             VDISPATCH_POOLING(
                     memory_desc_matches_tag(*src_md(), desired_fmt_tag),
                     VERBOSE_UNSUPPORTED_TAG_S, "src");
             VDISPATCH_POOLING(
                     memory_desc_matches_tag(*dst_md(), desired_fmt_tag),
                     VERBOSE_UNSUPPORTED_TAG_S, "dst");
-            VDISPATCH_POOLING(
-                    attr_.set_default_formats(dst_md(0)) == status::success,
-                    VERBOSE_UNSUPPORTED_POSTOP);
+
+            VDISPATCH_POOLING(memory_desc_wrapper(dst_md()).is_dense(false),
+                    VERBOSE_UNSUPPORTED_SPARSE_CFG);
+            VDISPATCH_POOLING(!has_zero_dim_memory(), VERBOSE_EMPTY_TENSOR, "");
+            VDISPATCH_POOLING(!is_dilated(), VERBOSE_UNSUPPORTED_FEATURE,
+                    "does not support dilations");
+
             VDISPATCH_POOLING(KW() < max_kernel_width,
                     VERBOSE_UNSUPPORTED_FEATURE,
                     "kernel width exceeds maximum");
 
+
             if (!attr()->post_ops_.has_default_values()) {
+                if (is_f16) return status::unimplemented;
+                
                 const auto &po = attr()->post_ops_;
                 if (po.len() == 1
                         && (po.entry_[0].is_binary()
@@ -92,6 +98,7 @@ struct riscv_nchw_pooling_fwd_t : public primitive_t {
             return status::success;
         }
 
+        static constexpr int max_kernel_width = 32;
         rvv_postops_t postops_;
     };
 
@@ -101,11 +108,11 @@ struct riscv_nchw_pooling_fwd_t : public primitive_t {
         return execute_forward(ctx);
     }
 
-    constexpr static int max_kernel_width = 32;
-
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
+
+    std::shared_ptr<jit_rvv_nchw_pool_kernel> kernel_;
 };
 
 } // namespace rv64
