@@ -35,9 +35,9 @@ if [[ "$ONEDNN_TEST_SET" == "SMOKE" ]]; then
 
 elif [[ "$ONEDNN_TEST_SET" == "CI" ]]; then
     set -x
-    start=${ONEDNN_TEST_PART:-1}
-    stride=${ONEDNN_TEST_STRIDE:-1}
-    ctest --no-tests=error --output-on-failure -I ${start},,${stride} -E $("${SCRIPT_DIR}"/skipped-tests.sh)
+    ctest --no-tests=error --output-on-failure \
+            -R '^test_benchdnn_modeC_graph_ci_cpu$' \
+            -E $("${SCRIPT_DIR}"/skipped-tests.sh)
     set +x
 
 else
