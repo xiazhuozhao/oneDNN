@@ -30,14 +30,14 @@ export QEMU_LD_PREFIX=/usr/riscv64-linux-gnu
 
 if [[ "$ONEDNN_TEST_SET" == "SMOKE" ]]; then
     set -x
-    ctest --no-tests=error --output-on-failure \
-            -R '^test_benchdnn_modeC_graph_ci_cpu$'
+    ctest --output-on-failure \
+            -R test_benchdnn_modeC_graph_ci_cpu
     set +x
 
 elif [[ "$ONEDNN_TEST_SET" == "CI" ]]; then
     set -x
-    ctest --no-tests=error --output-on-failure \
-            -R '^test_benchdnn_modeC_graph_ci_cpu$'
+    ctest --output-on-failure \
+            -R test_benchdnn_modeC_graph_ci_cpu
     set +x
 
 else
