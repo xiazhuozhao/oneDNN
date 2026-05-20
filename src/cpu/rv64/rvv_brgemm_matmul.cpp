@@ -150,13 +150,14 @@ protected:
 // ---------------------------------------------------------------------------
 struct jit_bias_postops_row_t : public jit_generator_t {
     // bias_type: 0=none, 1=scalar broadcast, 2=per-element vector
-    // postop: 0=none, 1=relu
+    // postop: 0=none, 1=leaky_relu (uses postop_alpha)
     struct call_params_t {
         float *row_dst; // offset 0
         dim_t N; // offset 8
         const float *bias_ptr; // offset 16
         int32_t bias_type; // offset 24
         int32_t postop; // offset 28
+        float postop_alpha; // offset 32
     };
 
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_bias_postops_row_t)
@@ -185,9 +186,10 @@ protected:
         const Reg reg_postop = t4;
 
         const FReg f_bias_scalar = fa0;
-        const FReg f_zero = fa1;
+        const FReg f_alpha = fa1;
         const VReg v_acc(0);
         const VReg v_bias(1);
+        const VReg v_orig(2);
 
         // Load parameters
         ld(reg_dst, reg_param, 0);
@@ -196,9 +198,8 @@ protected:
         lw(reg_bias_type, reg_param, 24);
         lw(reg_postop, reg_param, 28);
 
-        // Prepare f_zero = 0.0 for ReLU
-        xor_(reg_tmp, reg_tmp, reg_tmp);
-        fmv_w_x(f_zero, reg_tmp);
+        // Load alpha for Leaky ReLU
+        flw(f_alpha, reg_param, 32);
 
         Label loop, done;
         L(loop);
@@ -235,10 +236,12 @@ protected:
 
         L(after_bias);
 
-        // Post-op: ReLU (max(acc, 0))
+        // Post-op: Leaky ReLU f(x) = max(x, x * alpha)
         Label postop_done;
         beqz(reg_postop, postop_done);
-        vfmax_vf(v_acc, v_acc, f_zero);
+        vmv_v_v(v_orig, v_acc);
+        vfmul_vf(v_acc, v_acc, f_alpha);
+        vfmax_vv(v_acc, v_acc, v_orig);
         L(postop_done);
 
         // Store result
@@ -494,11 +497,14 @@ status_t rvv_brgemm_matmul_t::execute(const exec_ctx_t &ctx) const {
     const dim_t *src_dims_ptr = src_d.dims();
     const dim_t dst_batch_stride = M * N;
 
-    // Determine postop type for JIT kernel
+    // Determine postop type and alpha for JIT kernel
     int32_t postop = 0;
+    float postop_alpha = 0.f;
     if (post_ops.len() > 0 && post_ops.entry_[0].is_eltwise()
-            && post_ops.entry_[0].eltwise.alg == alg_kind::eltwise_relu)
+            && post_ops.entry_[0].eltwise.alg == alg_kind::eltwise_relu) {
         postop = 1;
+        postop_alpha = post_ops.entry_[0].eltwise.alpha;
+    }
 
     parallel_nd(batch, [&](dim_t b) {
         float *dst_base = dst + b * dst_batch_stride;
@@ -553,6 +559,7 @@ status_t rvv_brgemm_matmul_t::execute(const exec_ctx_t &ctx) const {
             bp.bias_ptr = bias_ptr;
             bp.bias_type = bias_type;
             bp.postop = postop;
+            bp.postop_alpha = postop_alpha;
             (*bias_postops_kernel)(&bp);
         }
     });
