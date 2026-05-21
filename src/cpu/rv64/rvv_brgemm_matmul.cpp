@@ -150,7 +150,6 @@ protected:
 // ---------------------------------------------------------------------------
 struct jit_bias_postops_row_t : public jit_generator_t {
     // bias_type: 0=none, 1=scalar broadcast, 2=per-element vector
-    // postop: 0=none, 1=leaky_relu (uses postop_alpha)
     struct call_params_t {
         float *row_dst; // offset 0
         dim_t N; // offset 8
@@ -187,9 +186,11 @@ protected:
 
         const FReg f_bias_scalar = fa0;
         const FReg f_alpha = fa1;
-        const VReg v_acc(0);
-        const VReg v_bias(1);
-        const VReg v_orig(2);
+        const FReg f_zero = fa2;
+        const VReg v_acc(1);
+        const VReg v_bias(2);
+        const VReg v_neg(3);
+        const VReg v_orig(4);
 
         // Load parameters
         ld(reg_dst, reg_param, 0);
@@ -197,9 +198,10 @@ protected:
         ld(reg_bias, reg_param, 16);
         lw(reg_bias_type, reg_param, 24);
         lw(reg_postop, reg_param, 28);
-
-        // Load alpha for Leaky ReLU
         flw(f_alpha, reg_param, 32);
+
+        xor_(reg_tmp, reg_tmp, reg_tmp);
+        fmv_w_x(f_zero, reg_tmp);
 
         Label loop, done;
         L(loop);
@@ -236,12 +238,20 @@ protected:
 
         L(after_bias);
 
-        // Post-op: Leaky ReLU f(x) = max(x, x * alpha)
-        Label postop_done;
+        // Post-op: ReLU with negative slope alpha
+        Label postop_done, leaky_relu;
         beqz(reg_postop, postop_done);
+
         vmv_v_v(v_orig, v_acc);
-        vfmul_vf(v_acc, v_acc, f_alpha);
-        vfmax_vv(v_acc, v_acc, v_orig);
+        fmv_x_w(reg_tmp, f_alpha);
+        bnez(reg_tmp, leaky_relu);
+        vfmax_vf(v_acc, v_acc, f_zero);
+        j_(postop_done);
+
+        L(leaky_relu);
+        vmfgt_vf(VReg(0), v_orig, f_zero);
+        vfmul_vf(v_neg, v_orig, f_alpha);
+        vmerge_vvm(v_acc, v_neg, v_orig);
         L(postop_done);
 
         // Store result
@@ -497,7 +507,6 @@ status_t rvv_brgemm_matmul_t::execute(const exec_ctx_t &ctx) const {
     const dim_t *src_dims_ptr = src_d.dims();
     const dim_t dst_batch_stride = M * N;
 
-    // Determine postop type and alpha for JIT kernel
     int32_t postop = 0;
     float postop_alpha = 0.f;
     if (post_ops.len() > 0 && post_ops.entry_[0].is_eltwise()
