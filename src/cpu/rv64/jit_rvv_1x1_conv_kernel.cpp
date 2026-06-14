@@ -487,6 +487,12 @@ void jit_rvv_1x1_conv_kernel_t::reduce_loop(int load_loop_blk, int ur) {
 
     init();
 
+    mv(reduce_loop_iter, reg_reduce_loop_work);
+    Label reduce_loop_label, reduce_loop_tail;
+
+    li(reg_tmp_imm, jcp.reduce_loop_unroll);
+    blt(reduce_loop_iter, reg_tmp_imm, reduce_loop_tail);
+
     // Load first round of weights (IC=0..unroll-1)
     for (int i_unroll = 0; i_unroll < jcp.reduce_loop_unroll; ++i_unroll) {
         for (int i_load = 0; i_load < load_loop_blk; ++i_load) {
@@ -501,12 +507,6 @@ void jit_rvv_1x1_conv_kernel_t::reduce_loop(int load_loop_blk, int ur) {
             }
         }
     }
-
-    mv(reduce_loop_iter, reg_reduce_loop_work);
-    Label reduce_loop_label, reduce_loop_tail;
-
-    li(reg_tmp_imm, jcp.reduce_loop_unroll);
-    blt(reduce_loop_iter, reg_tmp_imm, reduce_loop_tail);
 
     L(reduce_loop_label);
     {
