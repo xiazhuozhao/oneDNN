@@ -134,8 +134,9 @@ jobs:
       matrix:
         config: [
           # Test with different vector lengths and threading modes
-          { name: riscv-test-vlen128, threading: OMP, testset: SMOKE, vlen: 128, build: RelWithAssert },
-          { name: riscv-test-vlen256, threading: OMP, testset: SMOKE, vlen: 256, build: RelWithAssert }
+          { name: riscv-test-vlen128, threading: OMP, testset: SMOKE, build: RelWithAssert, qemu_cpu: "rv64,v=true,vlen=128,vext_spec=v1.0" },
+          { name: riscv-test-vlen256, threading: OMP, testset: SMOKE, build: RelWithAssert, qemu_cpu: "rv64,v=true,vlen=256,vext_spec=v1.0" },
+          { name: riscv-test-no-vector-extensions-benchmark, threading: OMP, testset: SMOKE, build: RelWithAssert, qemu_cpu: "rv64", riscv_profile: no_vector_extensions_benchmark }
         ]
 
     name: ${{ matrix.config.name }}, ${{ matrix.config.threading }}
@@ -185,7 +186,8 @@ jobs:
           CTEST_PARALLEL_LEVEL: 4
           ONEDNN_THREADING: ${{ matrix.config.threading }}
           ONEDNN_TEST_SET: ${{ matrix.config.testset }}
-          QEMU_CPU: "rv64,v=true,vlen=${{ matrix.config.vlen }},vext_spec=v1.0"
+          ONEDNN_RISCV_PROFILE: ${{ matrix.config.riscv_profile }}
+          QEMU_CPU: ${{ matrix.config.qemu_cpu }}
 
   # This job adds a check named "CI RISC-V" that represents overall
   # workflow status and can be used in branch rulesets
