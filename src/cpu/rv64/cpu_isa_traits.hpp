@@ -82,6 +82,7 @@ private:
             // HWPROBE / cpuinfo may not surface Zvfbfwma even on silicon
             // that implements it (firmware / DT lag). Trap-probe instead.
             has_zvfbfwma = probe_zvfbfwma();
+            if (has_zvfbfwma) __builtin_trap();
         } else {
             has_zvfh = false;
             has_zvfbfwma = false;
