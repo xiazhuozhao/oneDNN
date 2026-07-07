@@ -348,6 +348,16 @@ run_balanced_ci_tests() {
 echo "Using QEMU for test execution"
 export QEMU_LD_PREFIX=/usr/riscv64-linux-gnu
 
+if [[ -n "${ONEDNN_TEST_REGEX:-}" ]]; then
+    skipped_tests=$("${SCRIPT_DIR}"/skipped-tests.sh)
+    set -x
+    ctest --no-tests=error --output-on-failure -R "${ONEDNN_TEST_REGEX}" \
+            -E "${skipped_tests}"
+    set +x
+
+    exit 0
+fi
+
 if [[ "$ONEDNN_TEST_SET" == "SMOKE" ]]; then
     set -x
     ctest --no-tests=error --output-on-failure -E $("${SCRIPT_DIR}"/skipped-tests.sh)

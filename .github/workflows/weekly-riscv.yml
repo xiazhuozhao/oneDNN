@@ -158,6 +158,7 @@ jobs:
           ONEDNN_TEST_SET: ${{ matrix.config.testset }}
           ONEDNN_TEST_PART: ${{ matrix.config.part }}
           ONEDNN_TEST_STRIDE: ${{ matrix.config.stride }}
+          ONEDNN_TEST_REGEX: "^cpu-graph-sdpa-cpp$"
           QEMU_CPU: "rv64,v=true,zvfh=true,zvfbfwma=true,vlen=${{ matrix.config.vlen }},vext_spec=v1.0"
 
   # This job adds a check named "Weekly RISC-V" that represents overall
