@@ -79,6 +79,7 @@ private:
         if (has_v) {
             has_zvfh
                     = xbyak_cpu.hasExtension(Xbyak_riscv::RISCVExtension::Zvfh);
+            if (has_zvfh) __builtin_trap();
             // HWPROBE / cpuinfo may not surface Zvfbfwma even on silicon
             // that implements it (firmware / DT lag). Trap-probe instead.
             has_zvfbfwma = probe_zvfbfwma();
