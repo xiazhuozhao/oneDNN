@@ -177,7 +177,7 @@ jobs:
           QEMU_CPU: "rv64,v=true,vlen=${{ matrix.config.vlen }},vext_spec=v1.0"
 
   # Observe the native K1 runner separately before making it a required check.
-  # The four tests below are excluded only from the QEMU CI test set.
+  # Cover every test excluded from the RISC-V QEMU CI test set.
   test-qemu-excluded-on-k1:
     name: RISC-V K1 hardware, QEMU-excluded tests
     needs: build
@@ -258,6 +258,30 @@ jobs:
         timeout-minutes: 360
         working-directory: ${{ github.workspace }}/oneDNN/build
         run: ../.github/automation/riscv/test-native-qemu-excluded.sh test_benchdnn_modeC_ip_ci_cpu
+
+      - name: Run native COO matmul test
+        if: always()
+        timeout-minutes: 360
+        working-directory: ${{ github.workspace }}/oneDNN/build
+        run: ../.github/automation/riscv/test-native-qemu-excluded.sh cpu-matmul-coo-cpp
+
+      - name: Run native CSR matmul test
+        if: always()
+        timeout-minutes: 360
+        working-directory: ${{ github.workspace }}/oneDNN/build
+        run: ../.github/automation/riscv/test-native-qemu-excluded.sh cpu-matmul-csr-cpp
+
+      - name: Run native sum test
+        if: always()
+        timeout-minutes: 360
+        working-directory: ${{ github.workspace }}/oneDNN/build
+        run: ../.github/automation/riscv/test-native-qemu-excluded.sh test_sum
+
+      - name: Run native graph SDPA test
+        if: always()
+        timeout-minutes: 360
+        working-directory: ${{ github.workspace }}/oneDNN/build
+        run: ../.github/automation/riscv/test-native-qemu-excluded.sh cpu-graph-sdpa-cpp
 
       - name: Upload K1 hardware logs
         if: always()
