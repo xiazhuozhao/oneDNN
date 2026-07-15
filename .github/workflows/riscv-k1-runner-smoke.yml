@@ -1,0 +1,44 @@
+# *******************************************************************************
+# Copyright 2026 Institute of Software, Chinese Academy of Sciences
+# SPDX-License-Identifier: Apache-2.0
+# *******************************************************************************
+
+name: RISC-V K1 runner smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: K1 runner smoke
+    runs-on: [self-hosted, linux, riscv64, spacemit-k1, muse-pi-pro]
+    timeout-minutes: 30
+
+    steps:
+      - name: Collect system information
+        run: |
+          set -eux
+          uname -a
+          lscpu
+          cat /etc/os-release
+
+      - name: Checkout oneDNN
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Create smoke artifact
+        run: |
+          mkdir -p result
+          uname -a > result/uname.txt
+          id > result/id.txt
+
+      - name: Upload smoke artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: riscv-k1-runner-smoke-${{ github.run_id }}
+          path: result
+          retention-days: 7
