@@ -116,14 +116,14 @@ void compute_softmax_f16_rvv(const dnnl::impl::float16_t *src,
         dnnl::impl::float16_t *dst, dim_t len, bool is_logsoftmax,
         bool is_softmax_inf_as_zero) {
 
-    float max_val
-            = (float)nstl::numeric_limits<dnnl::impl::float16_t>::lowest();
+    float max_val = -INFINITY;
     bool has_nan = false;
     for (dim_t i = 0; i < len; ++i) {
         has_nan = has_nan || ((src[i].raw & 0x7fffu) > 0x7c00u);
         float val = (float)src[i];
         if (val > max_val) max_val = val;
     }
+    const bool max_is_minus_inf = max_val == -INFINITY;
     const bool max_is_pos_inf = max_val == INFINITY;
 
     if (len == 1 && isfinite((float)src[0])) {
@@ -131,7 +131,8 @@ void compute_softmax_f16_rvv(const dnnl::impl::float16_t *src,
         return;
     }
 
-    if (has_nan || max_is_pos_inf) {
+    if (has_nan || max_is_pos_inf
+            || (max_is_minus_inf && !is_softmax_inf_as_zero)) {
         compute_softmax_f16_scalar(src, dst, len, is_logsoftmax, max_val);
         return;
     }
@@ -150,8 +151,7 @@ void compute_softmax_f16_rvv(const dnnl::impl::float16_t *src,
     } else {
         float *tmp_dst = new float[len];
         float sum_exp = 0.f;
-        const bool all_minus_inf
-                = is_softmax_inf_as_zero && (max_val == -INFINITY);
+        const bool all_minus_inf = is_softmax_inf_as_zero && max_is_minus_inf;
 
         if (all_minus_inf) {
             for (dim_t i = 0; i < len; ++i)
