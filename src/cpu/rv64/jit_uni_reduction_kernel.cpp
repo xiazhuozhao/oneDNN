@@ -196,16 +196,19 @@ void jit_uni_reduction_kernel_t::emit_loop(src_kind_t src_kind) {
     Label loop;
 
     L(loop);
+    // v_acc carries partial reductions across strip-mined iterations. The last
+    // iteration can use a smaller VL, but emit_horizontal_reduce() later reads
+    // the full VLMAX accumulator. Preserve inactive accumulator lanes here.
     if (src_kind == src_kind_t::f32) {
-        vsetvli(reg_tmp, reg_n, SEW::e32, LMUL::m8, VTA::ta, VMA::ma);
+        vsetvli(reg_tmp, reg_n, SEW::e32, LMUL::m8, VTA::tu, VMA::ma);
         sub(reg_n, reg_n, reg_tmp);
         vle32_v(v_data, reg_src);
         advance_src(2);
     } else {
         if (is_f16_widen_acc())
-            vsetvli(reg_tmp, reg_n, SEW::e16, LMUL::m4, VTA::ta, VMA::ma);
+            vsetvli(reg_tmp, reg_n, SEW::e16, LMUL::m4, VTA::tu, VMA::ma);
         else
-            vsetvli(reg_tmp, reg_n, SEW::e16, LMUL::m8, VTA::ta, VMA::ma);
+            vsetvli(reg_tmp, reg_n, SEW::e16, LMUL::m8, VTA::tu, VMA::ma);
         sub(reg_n, reg_n, reg_tmp);
         vle16_v(v_data, reg_src);
         advance_src(1);
