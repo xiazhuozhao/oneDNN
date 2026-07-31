@@ -88,6 +88,7 @@ struct isa_info_t {
 };
 
 static isa_info_t get_isa_info_t(void) {
+    if (mayiuse(zvfbfwma)) return isa_info_t(zvfbfwma);
     if (mayiuse(zvfh)) return isa_info_t(zvfh);
     if (mayiuse(v)) return isa_info_t(v);
     return isa_info_t(isa_undef);
