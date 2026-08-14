@@ -580,10 +580,10 @@ void jit_uni_pool_kernel_t<isa>::max_step_fwd(int ur_w, int pad_l, int pad_r) {
             = (jpp.tag_kind == jit_pool_tag_kind_t::nspc) ? jpp.c : jpp.c_block;
     const int dt = jpp.dt_size;
 
-    // Init accumulators to the dtype lowest (f16 lowest for f16 so an all-pad
-    // window narrows exactly); zero the index accumulators for training.
-    const float init_val
-            = jpp.is_f16 ? -65504.0f : nstl::numeric_limits<float>::lowest();
+    // A non-empty window may legitimately contain only -Inf values. Start from
+    // -Inf so max pooling preserves that value instead of returning the lowest
+    // finite value of the destination type.
+    const float init_val = -INFINITY;
     load_f32_const(f_tmp, init_val, t2);
     for (int jj = 0; jj < ur_w; jj++) {
         vfmv_v_f(vreg(reg_ind(0, jj, ur_w)), f_tmp);
@@ -1201,7 +1201,7 @@ void jit_uni_pool_ncsp_kernel_t<isa, d_type>::generate_f32() {
 
     // Initialize accumulator
     if (is_max_pool_) {
-        // init_val = -FLT_MAX for max pool
+        // init_val = -Inf for max pool
         vfmv_v_f(v_acc, fa0);
     } else {
         vfmv_v_f(v_acc, fa1); // zero
@@ -1814,7 +1814,7 @@ void jit_uni_pool_interior_kernel_t<isa, d_type>::generate_nspc() {
     const int sw = jpp_.stride_w;
     const int ur_w = jpp_.ur_w;
     const int max_p = (ur_w - 1) * sw + kw; // W positions in the unrolled sweep
-    const float init_val = is_max ? -FLT_MAX : 0.0f;
+    const float init_val = is_max ? -INFINITY : 0.0f;
     const float avg_inc_scale = 1.0f / (float)(jpp_.kd * jpp_.kh * jpp_.kw);
 
     const Reg reg_param = a0;
