@@ -18,6 +18,7 @@
 #include "common/verbose.hpp"
 
 #include <array>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 
@@ -28,6 +29,62 @@ namespace rv64 {
 namespace gemm_utils {
 
 using namespace Xbyak_riscv;
+
+#define COPY_A_OFF(field) \
+    static_cast<int32_t>( \
+            offsetof(jit_rvv_gemm_copy_a_kernel_t::call_params_t, field))
+
+jit_rvv_gemm_copy_a_kernel_t::jit_rvv_gemm_copy_a_kernel_t()
+    : jit_generator_t("rv64_gemm_copy_a_jit") {
+    create_kernel();
+}
+
+void jit_rvv_gemm_copy_a_kernel_t::generate() {
+#if defined(XBYAK_RISCV_V) && XBYAK_RISCV_V == 1
+    const Reg reg_param = a0;
+    const Reg reg_src = a1;
+    const Reg reg_dst = a2;
+    const Reg reg_lda_bytes = a3;
+    const Reg reg_k = a4;
+    const Reg reg_m = a5;
+    const Reg reg_vl = t0;
+    const Reg reg_dst_bytes = t1;
+
+    const VReg v_data(0);
+
+    ld(reg_src, reg_param, COPY_A_OFF(src));
+    ld(reg_dst, reg_param, COPY_A_OFF(dst));
+    ld(reg_lda_bytes, reg_param, COPY_A_OFF(lda));
+    ld(reg_k, reg_param, COPY_A_OFF(K));
+    ld(reg_m, reg_param, COPY_A_OFF(m));
+
+    slli(reg_lda_bytes, reg_lda_bytes, 2);
+    vsetvli(reg_vl, reg_m, SEW::e32, LMUL::m4, VTA::ta, VMA::ma);
+    slli(reg_dst_bytes, reg_vl, 2);
+
+    Label loop, done;
+    L(loop);
+    beqz(reg_k, done);
+    vlse32_v(v_data, reg_src, reg_lda_bytes);
+    vse32_v(v_data, reg_dst);
+    addi(reg_src, reg_src, sizeof(float));
+    add(reg_dst, reg_dst, reg_dst_bytes);
+    addi(reg_k, reg_k, -1);
+    j_(loop);
+
+    L(done);
+    ret();
+#else
+    ret();
+#endif
+}
+
+void jit_rvv_gemm_copy_a(
+        const float *src, float *dst, dim_t lda, dim_t K, dim_t m) {
+    static const jit_rvv_gemm_copy_a_kernel_t kernel;
+    const jit_rvv_gemm_copy_a_kernel_t::call_params_t p {src, dst, lda, K, m};
+    kernel(&p);
+}
 
 jit_rvv_gemm_kernel_t::jit_rvv_gemm_kernel_t(
         dim_t n_cols, bool isTransA, bool isTransB, bool has_bias)

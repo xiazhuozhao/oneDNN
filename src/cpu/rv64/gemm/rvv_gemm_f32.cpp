@@ -38,19 +38,22 @@ using gemm_f32_traits = gemm_utils::gemm_utils_traits<float>;
 
 namespace {
 
-// Scalar copy of A into workspace for cache-friendly access.
 // Copies m rows x K columns of A into a contiguous buffer ws.
 // After copy, ws is laid out as K blocks of m contiguous elements:
 //   ws[k * m + i] = A_logical[i, k]
-void copy_A(
-        bool isTransA, dim_t K, const float *A, dim_t lda, float *ws, dim_t m) {
+void copy_A(bool isTransA, dim_t K, dim_t N, const float *A, dim_t lda,
+        float *ws, dim_t m) {
+    constexpr dim_t jit_copy_a_min_k = 128;
+    constexpr dim_t jit_copy_a_min_n = 128;
+    const bool use_jit_copy_a
+            = isTransA && K >= jit_copy_a_min_k && N >= jit_copy_a_min_n;
+    if (use_jit_copy_a) {
+        jit_rvv_gemm_copy_a(A, ws, lda, K, m);
+        return;
+    }
+
     for (dim_t k = 0; k < K; k++) {
-        if (isTransA) {
-            for (dim_t i = 0; i < m; i++)
-                ws[i] = A[i * lda + k];
-        } else {
-            std::memcpy(ws, A + k * lda, m * sizeof(float));
-        }
+        std::memcpy(ws, A + k * lda, m * sizeof(float));
         ws += m;
     }
 }
@@ -101,7 +104,9 @@ void block_ker(const dim_t M, const dim_t N, const dim_t K, const float *A,
         bool trans_a_eff;
 
         if (do_copy && tile_m == m_unroll) {
-            if (j_col == 0) { copy_A(isTransA, K, a_orig, lda, ws, m_unroll); }
+            if (j_col == 0) {
+                copy_A(isTransA, K, N, a_orig, lda, ws, m_unroll);
+            }
             a_eff = ws;
             lda_eff = m_unroll;
             trans_a_eff = false;

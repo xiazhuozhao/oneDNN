@@ -27,6 +27,30 @@ namespace cpu {
 namespace rv64 {
 namespace gemm_utils {
 
+struct jit_rvv_gemm_copy_a_kernel_t : public jit_generator_t {
+    struct call_params_t {
+        const float *src;
+        float *dst;
+        dim_t lda;
+        dim_t K;
+        dim_t m;
+    };
+
+    DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_rvv_gemm_copy_a_kernel_t)
+
+    jit_rvv_gemm_copy_a_kernel_t();
+
+    void operator()(const call_params_t *p) const {
+        jit_generator_t::operator()(p);
+    }
+
+protected:
+    void generate() override;
+};
+
+void jit_rvv_gemm_copy_a(
+        const float *src, float *dst, dim_t lda, dim_t K, dim_t m);
+
 // RVV JIT micro-kernel for f32 GEMM on RV64.
 //
 // Computes an m x n_cols tile of:
