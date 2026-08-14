@@ -53,8 +53,11 @@ init_scale_t compute_init_scale(alg_kind_t alg, int id_start, int id_end,
         dim_t kerH, dim_t kerW) {
     if (alg == alg_kind::pooling_max) {
         // Valid input elements may all be -Inf. A finite identity would then
-        // incorrectly win the reduction.
-        return {-INFINITY, 0.0f};
+        // incorrectly win the reduction. Empty windows, however, retain the
+        // established lowest-finite-value result.
+        const bool empty = id_start >= id_end || ih_start >= ih_end
+                || iw_start >= iw_end;
+        return {empty ? -FLT_MAX : -INFINITY, 0.0f};
     } else if (alg == alg_kind::pooling_avg_include_padding) {
         return {0.0f, 1.0f / (float)(kerD * kerH * kerW)};
     } else {
@@ -628,7 +631,7 @@ void pooling_train_max_ncsp(const ncsp_kernel_t<isa, d_type> &kernel,
         p.inW_stride = inW;
         p.inD_stride = inH * inW;
         p.w_spatial_byte_stride = (dim_t)sizeof(data_t);
-        p.init_val = -INFINITY;
+        p.init_val = empty ? -FLT_MAX : -INFINITY;
         p.scale_val = 0.0f;
         p.relu_alpha = 0.f;
         p.with_relu = false;

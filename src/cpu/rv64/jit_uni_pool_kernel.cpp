@@ -579,6 +579,17 @@ void jit_uni_pool_kernel_t<isa>::max_step_fwd(int ur_w, int pad_l, int pad_r) {
     const int c_off
             = (jpp.tag_kind == jit_pool_tag_kind_t::nspc) ? jpp.c : jpp.c_block;
     const int dt = jpp.dt_size;
+    const float empty_val = jpp.is_f16
+            ? -65504.0f
+            : nstl::numeric_limits<float>::lowest();
+    auto has_valid_width = [&](int jj) {
+        const int iw_start = nstl::max(jj * stride_w - pad_l, 0);
+        const int iw_end = nstl::min(jj * stride_w - pad_l + kw, iw);
+        return iw_start < iw_end;
+    };
+    bool has_empty_width = false;
+    for (int jj = 0; jj < ur_w; jj++)
+        has_empty_width = has_empty_width || !has_valid_width(jj);
 
     // A non-empty window may legitimately contain only -Inf values. Start from
     // -Inf so max pooling preserves that value instead of returning the lowest
@@ -591,12 +602,14 @@ void jit_uni_pool_kernel_t<isa>::max_step_fwd(int ur_w, int pad_l, int pad_r) {
     }
     if (jpp.is_training) vmv_v_x(v_k_offset, reg_k_shift);
 
-    Label kd_label;
+    Label kd_label, empty_window, finalize;
+    beqz_far(reg_kh, empty_window);
     if (jpp.ndims == 5) {
+        ld(reg_kd, reg_param, GET_OFF(kd_padding));
+        beqz_far(reg_kd, empty_window);
         sd(reg_input, sp, kBakedSpillInput);
         sd(reg_output, sp, kBakedSpillOutput);
         mv(aux_reg_input_d, reg_input);
-        ld(reg_kd, reg_param, GET_OFF(kd_padding));
         L(kd_label);
         mv(aux_reg_input, aux_reg_input_d);
     } else {
@@ -641,6 +654,20 @@ void jit_uni_pool_kernel_t<isa>::max_step_fwd(int ur_w, int pad_l, int pad_r) {
         ld(reg_output, sp, kBakedSpillOutput);
     }
 
+    if (has_empty_width) {
+        load_f32_const(f_tmp, empty_val, t2);
+        for (int jj = 0; jj < ur_w; jj++)
+            if (!has_valid_width(jj))
+                vfmv_v_f(vreg(reg_ind(0, jj, ur_w)), f_tmp);
+    }
+    j_(finalize);
+
+    L(empty_window);
+    load_f32_const(f_tmp, empty_val, t2);
+    for (int jj = 0; jj < ur_w; jj++)
+        vfmv_v_f(vreg(reg_ind(0, jj, ur_w)), f_tmp);
+
+    L(finalize);
     if (jpp.with_postops) apply_postops(ur_w, c_off);
     for (int jj = 0; jj < ur_w; jj++) {
         store(reg_ind(0, jj, ur_w), reg_output, dt * jj * c_off);
