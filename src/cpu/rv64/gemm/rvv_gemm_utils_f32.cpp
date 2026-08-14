@@ -15,11 +15,13 @@
 * limitations under the License.
 *******************************************************************************/
 #include <cmath>
+#include <cstddef>
 
 #include "common/dnnl_thread.hpp"
 #include "common/utils.hpp"
 
 #include "cpu/rv64/gemm/rvv_gemm_utils_f32.hpp"
+#include "cpu/rv64/jit_generator.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -29,6 +31,145 @@ namespace gemm_utils {
 
 std::atomic<dim_t> rvv_gemm_f32_m_unroll {0};
 std::atomic<dim_t> rvv_gemm_s8_m_unroll {0};
+
+namespace {
+
+using namespace Xbyak_riscv;
+
+struct jit_rvv_sum_two_matrices_kernel_t : public jit_generator_t {
+    struct call_params_t {
+        const void *src;
+        void *dst;
+        dim_t ld_src;
+        dim_t ld_dst;
+        dim_t m;
+        dim_t n;
+    };
+
+    DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_rvv_sum_two_matrices_kernel_t)
+
+    explicit jit_rvv_sum_two_matrices_kernel_t(bool is_float)
+        : jit_generator_t("rv64_sum_two_matrices_jit"), is_float_(is_float) {
+        create_kernel();
+    }
+
+    void operator()(const call_params_t *p) const {
+        jit_generator_t::operator()(p);
+    }
+
+protected:
+    void generate() override {
+#if defined(XBYAK_RISCV_V) && XBYAK_RISCV_V == 1
+#define SUM_OFF(field) static_cast<int32_t>(offsetof(call_params_t, field))
+
+        const Reg reg_param = a0;
+        const Reg reg_src_base = a1;
+        const Reg reg_dst_base = a2;
+        const Reg reg_ld_src_bytes = a3;
+        const Reg reg_ld_dst_bytes = a4;
+        const Reg reg_m = a5;
+        const Reg reg_n = a6;
+        const Reg reg_src = t0;
+        const Reg reg_dst = t1;
+        const Reg reg_remaining = t2;
+        const Reg reg_vl = t3;
+        const Reg reg_bytes = t4;
+
+        const VReg v_src(0);
+        const VReg v_dst(4);
+
+        ld(reg_src_base, reg_param, SUM_OFF(src));
+        ld(reg_dst_base, reg_param, SUM_OFF(dst));
+        ld(reg_ld_src_bytes, reg_param, SUM_OFF(ld_src));
+        ld(reg_ld_dst_bytes, reg_param, SUM_OFF(ld_dst));
+        ld(reg_m, reg_param, SUM_OFF(m));
+        ld(reg_n, reg_param, SUM_OFF(n));
+        slli(reg_ld_src_bytes, reg_ld_src_bytes, 2);
+        slli(reg_ld_dst_bytes, reg_ld_dst_bytes, 2);
+
+        Label column_loop, vector_loop, next_column, done;
+        L(column_loop);
+        beqz(reg_n, done);
+        mv(reg_src, reg_src_base);
+        mv(reg_dst, reg_dst_base);
+        mv(reg_remaining, reg_m);
+
+        L(vector_loop);
+        beqz(reg_remaining, next_column);
+        vsetvli(reg_vl, reg_remaining, SEW::e32, LMUL::m4, VTA::ta, VMA::ma);
+        vle32_v(v_src, reg_src);
+        vle32_v(v_dst, reg_dst);
+        if (is_float_)
+            vfadd_vv(v_dst, v_dst, v_src);
+        else
+            vadd_vv(v_dst, v_dst, v_src);
+        vse32_v(v_dst, reg_dst);
+        slli(reg_bytes, reg_vl, 2);
+        add(reg_src, reg_src, reg_bytes);
+        add(reg_dst, reg_dst, reg_bytes);
+        sub(reg_remaining, reg_remaining, reg_vl);
+        j_(vector_loop);
+
+        L(next_column);
+        add(reg_src_base, reg_src_base, reg_ld_src_bytes);
+        add(reg_dst_base, reg_dst_base, reg_ld_dst_bytes);
+        addi(reg_n, reg_n, -1);
+        j_(column_loop);
+
+        L(done);
+        ret();
+#undef SUM_OFF
+#else
+        ret();
+#endif
+    }
+
+private:
+    bool is_float_;
+};
+
+void run_sum_two_matrices(dim_t m, dim_t n, void *p_src, dim_t ld_src,
+        void *p_dst, dim_t ld_dst, bool is_float) {
+    constexpr dim_t jit_sum_two_matrices_min_elems = 8192;
+    if (m * n < jit_sum_two_matrices_min_elems) {
+        if (is_float) {
+            auto *src = static_cast<float *>(p_src);
+            auto *dst = static_cast<float *>(p_dst);
+            for (dim_t j = 0; j < n; j++)
+                for (dim_t i = 0; i < m; i++)
+                    dst[i + j * ld_dst] += src[i + j * ld_src];
+        } else {
+            auto *src = static_cast<int32_t *>(p_src);
+            auto *dst = static_cast<int32_t *>(p_dst);
+            for (dim_t j = 0; j < n; j++)
+                for (dim_t i = 0; i < m; i++)
+                    dst[i + j * ld_dst] += src[i + j * ld_src];
+        }
+        return;
+    }
+
+    const jit_rvv_sum_two_matrices_kernel_t::call_params_t p {
+            p_src, p_dst, ld_src, ld_dst, m, n};
+    if (is_float) {
+        static const jit_rvv_sum_two_matrices_kernel_t kernel(true);
+        kernel(&p);
+    } else {
+        static const jit_rvv_sum_two_matrices_kernel_t kernel(false);
+        kernel(&p);
+    }
+}
+
+} // namespace
+
+void sum_two_matrices(dim_t m, dim_t n, float *__restrict p_src, dim_t ld_src,
+        float *__restrict p_dst, dim_t ld_dst) {
+    run_sum_two_matrices(m, n, p_src, ld_src, p_dst, ld_dst, true);
+}
+
+void sum_two_matrices(dim_t m, dim_t n, int32_t *__restrict p_src, dim_t ld_src,
+        int32_t *__restrict p_dst, dim_t ld_dst) {
+    run_sum_two_matrices(m, n, p_src, ld_src, p_dst, ld_dst, false);
+}
 
 #define BM_NOCOPY_RVV 64
 #define BN_NOCOPY_RVV 48
