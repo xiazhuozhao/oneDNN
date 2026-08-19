@@ -16,11 +16,7 @@ case "${test_name}" in
     test_benchdnn_modeC_matmul_sparse_ci_cpu \
             | test_benchdnn_modeC_graph_ci_cpu \
             | test_benchdnn_modeC_matmul_ci_cpu \
-            | test_benchdnn_modeC_ip_ci_cpu \
-            | cpu-matmul-coo-cpp \
-            | cpu-matmul-csr-cpp \
-            | test_sum \
-            | cpu-graph-sdpa-cpp) ;;
+            | test_benchdnn_modeC_ip_ci_cpu) ;;
     *)
         echo "Unsupported native QEMU-excluded test: ${test_name}" >&2
         exit 2
