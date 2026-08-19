@@ -20,12 +20,6 @@ name: "Weekly RISC-V"
 
 on:
   workflow_dispatch:
-    inputs:
-      run_qemu_tests:
-        description: Run the ten QEMU test partitions as well as the K1 test job
-        required: true
-        default: true
-        type: boolean
   schedule:
     #* minute (0-59) hour (0-23) day (1-31) month (1-12)  day of the week (0 - 6)
     #* cron jobs run on the default (main) branch.
@@ -109,7 +103,6 @@ jobs:
 
   test:
     needs: build
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_qemu_tests }}
     strategy:
       matrix:
         config: [
