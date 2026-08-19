@@ -31,10 +31,6 @@ esac
 # the cross-compilation workflow environment.
 unset QEMU_LD_PREFIX QEMU_CPU
 
-# The cross-compiled shared library remains in the build tree. Unlike the QEMU
-# setup, the native loader needs that directory explicitly at test time.
-export LD_LIBRARY_PATH="${PWD}/src${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-
 mkdir -p "${log_dir}"
 
 timeout --signal=TERM --kill-after=5m 6h \
