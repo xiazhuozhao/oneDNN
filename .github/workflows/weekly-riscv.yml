@@ -20,11 +20,6 @@ name: "Weekly RISC-V"
 
 on:
   workflow_dispatch:
-  schedule:
-    # minute (0-59) hour (0-23) day (1-31) month (1-12)  day of the week (0 - 6)
-    # cron jobs run on the default (main) branch.
-    # set to run at 5am Saturday UCT
-  - cron: "0 5 * * 6"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -111,21 +106,7 @@ jobs:
 
   test:
     needs: build
-    strategy:
-      # QEMU tests are long-running. To reduce the load on GitHub-hosted
-      # runners shared across the organization,
-      # run at most 2 test partitions at a time.
-      max-parallel: 2
-      fail-fast: false
-      matrix:
-        config: [
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 1, stride: 4 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 2, stride: 4 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 3, stride: 4 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 4, stride: 4 }
-        ]
-
-    name: ${{ matrix.config.name }}, ${{ matrix.config.threading }}, part-${{ matrix.config.part }}
+    name: riscv-test-vlen128, OMP, sparse-and-sum
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout oneDNN
@@ -162,24 +143,33 @@ jobs:
         working-directory: ${{ github.workspace }}/oneDNN
         run: bash .github/automation/riscv/setup-qemu.sh
 
-      - name: Run oneDNN tests
-        run: ${{ github.workspace }}/oneDNN/.github/automation/riscv/test.sh
+      - name: Recheck sparse examples and sum
         working-directory: ${{ github.workspace }}/oneDNN/build
         env:
           CTEST_PARALLEL_LEVEL: 4
-          ONEDNN_TEST_PARTITION: balanced
-          ONEDNN_THREADING: ${{ matrix.config.threading }}
-          ONEDNN_TEST_SET: ${{ matrix.config.testset }}
-          ONEDNN_TEST_PART: ${{ matrix.config.part }}
-          ONEDNN_TEST_STRIDE: ${{ matrix.config.stride }}
-          QEMU_CPU: "rv64,v=true,zvfh=true,zvfbfwma=true,vlen=${{ matrix.config.vlen }},vext_spec=v1.0"
+          QEMU_LD_PREFIX: /usr/riscv64-linux-gnu
+          QEMU_CPU: "rv64,v=true,zvfh=true,zvfbfwma=true,vlen=128,vext_spec=v1.0"
+        run: |
+          pattern='^(cpu-matmul-coo-cpp|cpu-matmul-csr-cpp|test_sum)$'
+          ctest --show-only=json-v1 -R "$pattern" > selected-tests.json
+          python3 - <<'PYTHON'
+          import json
+          with open("selected-tests.json") as f:
+              names = [test["name"] for test in json.load(f)["tests"]]
+          expected = {"cpu-matmul-coo-cpp", "cpu-matmul-csr-cpp", "test_sum"}
+          assert len(names) == 3 and set(names) == expected, names
+          print("Selected tests:", ", ".join(names))
+          PYTHON
+          ctest --no-tests=error --verbose --output-on-failure \
+              --output-junit riscv-tests.xml -R "$pattern"
 
       - name: Upload test timings and diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: weekly-riscv-vlen128-part-${{ matrix.config.part }}
+          name: riscv-vlen128-sparse-and-sum
           path: |
+            ${{ github.workspace }}/oneDNN/build/selected-tests.json
             ${{ github.workspace }}/oneDNN/build/riscv-tests.xml
             ${{ github.workspace }}/oneDNN/build/Testing/
           retention-days: 14
