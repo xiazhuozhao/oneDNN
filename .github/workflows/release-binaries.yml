@@ -147,6 +147,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-24.04
     env:
+      CTEST_PARALLEL_LEVEL: 4
       COMPILER: riscv64-gcc
       CPU_RUNTIME: OMP
       GPU_RUNTIME: NONE
