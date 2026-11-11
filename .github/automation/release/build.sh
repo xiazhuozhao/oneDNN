@@ -2,6 +2,7 @@
 
 # *******************************************************************************
 # Copyright 2026 Intel Corporation
+# Copyright 2026 Institute of Software, Chinese Academy of Sciences
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,7 +24,7 @@
 # Usage: build.sh <install-dir>
 #
 # Environment:
-#   COMPILER             gcc or icx
+#   COMPILER             gcc, riscv64-gcc, or icx
 #   CPU_RUNTIME          value for ONEDNN_CPU_RUNTIME
 #   GPU_RUNTIME          value for ONEDNN_GPU_RUNTIME
 #   DEVTOOLSET_ROOTPATH  (optional) GCC toolset root, set in manylinux images
@@ -44,6 +45,13 @@ case "$COMPILER" in
     gcc)
         export CC="${GCC_ROOT:+$GCC_ROOT/bin/}gcc"
         export CXX="$GXX"
+        ;;
+    riscv64-gcc)
+        export CC=riscv64-linux-gnu-gcc-14
+        export CXX=riscv64-linux-gnu-g++-14
+        CMAKE_EXTRA_ARGS+=(
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/riscv64.cmake"
+        )
         ;;
     icx)
         set +o errexit +o pipefail +o nounset
